@@ -5,8 +5,6 @@ import socket
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Sequence
-
 from .errors import IProxyNotFoundError, TunnelError
 
 
@@ -78,6 +76,79 @@ class IProxyTunnel:
             process.kill(); process.wait(timeout=3)
 
     def __enter__(self) -> "IProxyTunnel": return self.start()
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        self.stop()
+        return False
+
+
+@dataclass
+class AScriptTunnel:
+    """Forward the AScript service and optional log stream over USB.
+
+    This is the preferred USB tunnel for AScript: the HTTP service uses port
+    ``9096`` and the log WebSocket uses port ``10102``.  ``IProxyTunnel``
+    remains available when an application needs an individual custom mapping.
+    """
+
+    local_port: int = 9096
+    remote_port: int = 9096
+    local_log_port: int = 10102
+    remote_log_port: int = 10102
+    forward_logs: bool = True
+    udid: str = ""
+    executable: str = "iproxy"
+    local_host: str = "127.0.0.1"
+    startup_timeout: float = 8.0
+    service: IProxyTunnel = field(init=False)
+    logs: IProxyTunnel | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.forward_logs, bool):
+            raise ValueError("forward_logs must be a boolean")
+        if self.forward_logs and self.local_port == self.local_log_port:
+            raise ValueError("local_port and local_log_port must differ when forwarding logs")
+        common = {
+            "udid": self.udid,
+            "executable": self.executable,
+            "local_host": self.local_host,
+            "startup_timeout": self.startup_timeout,
+        }
+        self.service = IProxyTunnel(self.local_port, self.remote_port, **common)
+        if self.forward_logs:
+            self.logs = IProxyTunnel(self.local_log_port, self.remote_log_port, **common)
+
+    @property
+    def address(self) -> str:
+        """Local address used for normal AScript HTTP requests."""
+        return self.service.address
+
+    @property
+    def log_address(self) -> str | None:
+        """Local address of the AScript log WebSocket, when enabled."""
+        return self.logs.address if self.logs else None
+
+    @property
+    def is_running(self) -> bool:
+        return self.service.is_running and (self.logs is None or self.logs.is_running)
+
+    def start(self) -> "AScriptTunnel":
+        self.service.start()
+        try:
+            if self.logs:
+                self.logs.start()
+        except Exception:
+            self.service.stop()
+            raise
+        return self
+
+    def stop(self) -> None:
+        if self.logs:
+            self.logs.stop()
+        self.service.stop()
+
+    def __enter__(self) -> "AScriptTunnel":
+        return self.start()
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
         self.stop()

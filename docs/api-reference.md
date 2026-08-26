@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.5.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.5.1`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -45,6 +45,21 @@ print(client.base_url)  # http://192.168.3.17:9096
 from asclient import connect
 device = connect("192.168.3.17:9096", timeout=20)
 ```
+
+### `AScriptTunnel`
+
+推荐的 USB 隧道管理器。一次启动 AScript HTTP 服务的 `9096` 映射和日志 WebSocket 的 `10102` 映射，任一映射启动失败时会停止另一条映射。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](usb-tunnel.md)。
+
+```python
+from asclient import AScriptTunnel, connect
+
+with AScriptTunnel(udid="") as tunnel:
+    device = connect(tunnel.address)
+    print(tunnel.log_address)  # 127.0.0.1:10102
+    print(device.client.status())
+```
+
+可配置 `local_port`、`remote_port`、`local_log_port`、`remote_log_port`、`udid`、`executable`、`local_host` 和 `startup_timeout`。`forward_logs=False` 只映射 HTTP 服务。`.address` 是 HTTP 客户端地址，`.log_address` 是日志地址或 `None`，`.start()` / `.stop()` 管理两条映射的生命周期。
 
 ### `IProxyTunnel`
 
@@ -570,7 +585,7 @@ py -m asclient --yes remove smoke
 | `dump` | `dump [output.xml] [--mode MODE]` | 保存 XML 控件树 |
 | `observe` | `observe [--prefix PREFIX]` | 同时保存截图与 XML |
 | `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |
-| `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--udid UDID] [--iproxy PATH]` | 以前台方式管理 USB `iproxy` 隧道 |
+| `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]` | 以前台方式同时管理 HTTP 与日志 USB `iproxy` 隧道；`--no-logs` 仅映射 HTTP |
 | `tap` | `--yes tap X Y [--duration MS]` | 坐标点击 |
 | `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS]` | 坐标滑动 |
 | `input` | `--yes input TEXT [--interval MS]` | 输入文本 |

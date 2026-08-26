@@ -8,7 +8,7 @@
 ASClient -> 127.0.0.1:9096 -> iproxy -> USB -> iPhone:9096
 ```
 
-日志端口可按相同方式映射：
+同一个 `tunnel` 命令默认还会启动日志回显端口的映射：
 
 ```text
 ASClient -> 127.0.0.1:10102 -> iproxy -> USB -> iPhone:10102
@@ -47,6 +47,9 @@ USB 使用时将 `device.address` 设为本机回环地址：
     "local_host": "127.0.0.1",
     "local_port": 9096,
     "remote_port": 9096,
+    "local_log_port": 10102,
+    "remote_log_port": 10102,
+    "forward_logs": true,
     "udid": "",
     "startup_timeout": 8
   }
@@ -66,7 +69,7 @@ py -m asclient tunnel
 成功后会显示：
 
 ```text
-USB tunnel is running: 127.0.0.1:9096 -> device:9096.
+USB tunnel is running: service=127.0.0.1:9096 -> device:9096; logs=127.0.0.1:10102 -> device:10102.
 ```
 
 在另一个终端中使用正常命令：
@@ -80,32 +83,36 @@ py -m asclient inspect
 临时覆盖配置：
 
 ```bat
-py -m asclient tunnel --local-port 19096 --remote-port 9096 --udid <UDID>
+py -m asclient tunnel --local-port 19096 --remote-port 9096 --local-log-port 11002 --remote-log-port 10102 --udid <UDID>
 py -m asclient --device 127.0.0.1:19096 status
 ```
 
-`tunnel` 在前台运行，按 `Ctrl+C` 会终止由 ASClient 启动的 `iproxy` 进程。不要把该进程作为后台孤儿任务长期保留。
+需要排查 HTTP 服务而不使用日志时，可传入 `--no-logs`。否则默认应保持 `forward_logs: true`，这样 `py -m asclient log`、`deploy --logs` 和 Python `client.logs()` 都会通过同一条 USB 连接工作。
+
+`tunnel` 在前台运行，按 `Ctrl+C` 会终止由 ASClient 启动的两个 `iproxy` 进程。不要把这些进程作为后台孤儿任务长期保留。
 
 ## Python 使用
 
 ```python
-from asclient import IProxyTunnel, connect
+from asclient import AScriptTunnel, connect
 
-with IProxyTunnel(local_port=9096, remote_port=9096, udid="") as tunnel:
+with AScriptTunnel(udid="") as tunnel:
     device = connect(tunnel.address)
     print(device.client.status())
 ```
 
-日志也需要映射时，使用第二个隧道并避开端口冲突：
+`AScriptTunnel` 默认同时映射日志端口，因此日志无需额外处理：
 
 ```python
-from asclient import AScriptClient, IProxyTunnel
+from asclient import AScriptClient, AScriptTunnel
 
-with IProxyTunnel(9096, 9096), IProxyTunnel(10102, 10102):
+with AScriptTunnel():
     client = AScriptClient("127.0.0.1:9096")
     for entry in client.logs(duration=5):
         print(entry.message)
 ```
+
+高级调用可继续使用 `IProxyTunnel` 建立单个非标准端口映射。
 
 ## 安全边界
 
@@ -121,7 +128,7 @@ with IProxyTunnel(9096, 9096), IProxyTunnel(10102, 10102):
 | `iproxy executable not found` | 未安装或不在 PATH | 安装受信任的 `iproxy`，或设置 `tunnel.iproxy` 为绝对路径 |
 | `iproxy exited during startup` | USB 未连接、设备未信任、端口冲突或 UDID 错误 | 重新插拔/解锁并信任设备；检查端口和 UDID |
 | 隧道运行但 `status` 失败 | AScript 服务未开启或远端端口不对 | 在手机确认服务；检查 `remote_port` 默认应为 `9096` |
-| `log` 失败 | 仅映射了 9096 | 再启动一个 `10102 -> 10102` 隧道 |
+| `log` 失败 | 日志隧道被关闭、端口冲突或设备端日志服务不可用 | 移除 `--no-logs`，确认 `forward_logs` 为 `true`，检查本机 `10102` 与远端 `10102` |
 | 多设备连接到错误手机 | `udid` 留空 | 在配置中固定目标 UDID |
 
 隧道成功只说明本地端口已由 `iproxy` 接管；仍必须执行 `py -m asclient status` 验证 AScript 服务与目标 App 环境。

@@ -42,6 +42,7 @@ def tunnel_options(config: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(value)
     for key in ("iproxy", "udid", "local_host"):
         if key in result and not isinstance(result[key], str): raise ValueError(f"tunnel.{key} must be a string")
-    for key in ("local_port", "remote_port", "startup_timeout"):
+    for key in ("local_port", "remote_port", "local_log_port", "remote_log_port", "startup_timeout"):
         if key in result and not isinstance(result[key], (int, float)): raise ValueError(f"tunnel.{key} must be numeric")
+    if "forward_logs" in result and not isinstance(result["forward_logs"], bool): raise ValueError("tunnel.forward_logs must be a boolean")
     return result

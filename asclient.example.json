@@ -10,6 +10,9 @@
     "local_host": "127.0.0.1",
     "local_port": 9096,
     "remote_port": 9096,
+    "local_log_port": 10102,
+    "remote_log_port": 10102,
+    "forward_logs": true,
     "udid": "",
     "startup_timeout": 8
   }

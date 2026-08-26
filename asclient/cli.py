@@ -11,7 +11,7 @@ from typing import Any
 from .client import AScriptClient
 from .config import device_options, load_config, tunnel_options
 from .errors import AScriptError
-from .tunnel import IProxyTunnel
+from .tunnel import AScriptTunnel
 
 
 def _client(args: argparse.Namespace) -> AScriptClient:
@@ -23,11 +23,14 @@ def _client(args: argparse.Namespace) -> AScriptClient:
     return AScriptClient(address, password=password, timeout=timeout, retries=retries)
 
 
-def _tunnel(args: argparse.Namespace) -> IProxyTunnel:
+def _tunnel(args: argparse.Namespace) -> AScriptTunnel:
     options = tunnel_options(load_config(args.config))
-    return IProxyTunnel(
+    return AScriptTunnel(
         local_port=int(args.local_port if args.local_port is not None else options.get("local_port", 9096)),
         remote_port=int(args.remote_port if args.remote_port is not None else options.get("remote_port", 9096)),
+        local_log_port=int(args.local_log_port if args.local_log_port is not None else options.get("local_log_port", 10102)),
+        remote_log_port=int(args.remote_log_port if args.remote_log_port is not None else options.get("remote_log_port", 10102)),
+        forward_logs=False if args.no_logs else bool(options.get("forward_logs", True)),
         udid=args.udid if args.udid is not None else str(options.get("udid", "")),
         executable=args.iproxy if args.iproxy is not None else str(options.get("iproxy", "iproxy")),
         local_host=str(options.get("local_host", "127.0.0.1")),
@@ -65,7 +68,10 @@ def _parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect", help="start the local browser UI inspector")
     inspect.add_argument("--host", default="127.0.0.1"); inspect.add_argument("--port", type=int, default=0); inspect.add_argument("--no-browser", action="store_true")
     tunnel = commands.add_parser("tunnel", help="run an iproxy USB tunnel until Ctrl+C")
-    tunnel.add_argument("--local-port", type=int); tunnel.add_argument("--remote-port", type=int); tunnel.add_argument("--udid"); tunnel.add_argument("--iproxy")
+    tunnel.add_argument("--local-port", type=int); tunnel.add_argument("--remote-port", type=int)
+    tunnel.add_argument("--local-log-port", type=int); tunnel.add_argument("--remote-log-port", type=int)
+    tunnel.add_argument("--no-logs", action="store_true", help="forward only the HTTP service port")
+    tunnel.add_argument("--udid"); tunnel.add_argument("--iproxy")
     ev = commands.add_parser("eval"); ev.add_argument("code")
     cat = commands.add_parser("cat"); cat.add_argument("path"); cat.add_argument("output", nargs="?")
     ocr = commands.add_parser("ocr"); ocr.add_argument("rect", nargs="?")
@@ -109,7 +115,10 @@ def main(argv: list[str] | None = None) -> int:
             finally: server.server_close()
         elif cmd == "tunnel":
             tunnel = _tunnel(args).start()
-            print(f"USB tunnel is running: {tunnel.address} -> device:{tunnel.remote_port}. Set device.address to {tunnel.address}. Press Ctrl+C to stop.")
+            routes = f"service={tunnel.address} -> device:{tunnel.remote_port}"
+            if tunnel.log_address:
+                routes += f"; logs={tunnel.log_address} -> device:{tunnel.remote_log_port}"
+            print(f"USB tunnel is running: {routes}. Set device.address to {tunnel.address}. Press Ctrl+C to stop.")
             try:
                 while tunnel.is_running: time.sleep(0.25)
                 raise OSError("iproxy exited unexpectedly")

@@ -211,7 +211,7 @@ py -m asclient --yes remove smoke
 2. 将密码保存于被 Git 忽略的 `asclient.json`，不要写入源代码、批处理文件、日志或截图。CI 中应由受保护的密钥步骤生成临时配置文件。
 3. `eval` 直接执行设备端 Python；它只可用于受信任的维护脚本，禁止接收终端用户输入、网页参数或未审查的 CI 变量。
 4. CLI 中 `push`、`remove`、`rename`、`run`、`deploy`、坐标动作、`eval` 和原始 `api` 均要求命令前显式写 `--yes`。生产脚本必须明确项目名，禁止由不可信输入拼接项目名或远程路径。
-5. USB 连接使用 `IProxyTunnel` 或 `py -m asclient tunnel`，并只配置回环地址。详细的设备配对、UDID、端口和防火墙要求见 [USB 隧道运维指南](usb-tunnel.md)。
+5. USB 连接使用 `AScriptTunnel` 或 `py -m asclient tunnel`，并只配置回环地址。默认同时映射 HTTP `9096` 和日志回显 `10102`；详细的设备配对、UDID、端口和防火墙要求见 [USB 隧道运维指南](usb-tunnel.md)。
 6. Inspector 默认本机监听。保持此默认值，且不要在录屏或日志中泄露页面敏感信息。
 7. 自动化账号遵循最小权限原则，测试数据必须可清理、可复现且不包含真实个人数据。
 
