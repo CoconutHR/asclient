@@ -3,14 +3,17 @@ import json
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import urlopen
 
-from asclient import AScriptClient, Device, DeviceOperationError, Run, connect
-from asclient.config import device_options, load_config
+from asclient import AScriptClient, Device, DeviceOperationError, IProxyTunnel, Run, connect
+from asclient.cli import main
+from asclient.config import device_options, load_config, tunnel_options
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -129,6 +132,20 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(device_options(load_config(path))["address"], "127.0.0.1:9096")
             path.write_text("[]", encoding="utf-8")
             with self.assertRaises(ValueError): load_config(path)
+
+    def test_tunnel_configuration_and_command(self):
+        options = tunnel_options({"tunnel": {"iproxy": "custom-iproxy", "local_port": 19096, "remote_port": 9096, "udid": "abc"}})
+        tunnel = IProxyTunnel(**{"local_port": int(options["local_port"]), "remote_port": int(options["remote_port"]), "udid": options["udid"], "executable": options["iproxy"]})
+        self.assertEqual(tunnel.address, "127.0.0.1:19096")
+        self.assertEqual(tunnel.command, ["custom-iproxy", "-u", "abc", "19096", "9096"])
+
+    def test_cli_requires_yes_for_state_changes(self):
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            status = main(["--device", f"127.0.0.1:{self.server.server_port}", "remove", "demo"])
+        self.assertEqual(status, 1)
+        self.assertIn("--yes", stderr.getvalue())
+        self.assertFalse(any(call[1] == "/api/module/remove" for call in Handler.calls))
 
     def test_capture_artifacts_saves_available_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -24,6 +24,7 @@ ASClient 是 AScript iOS 本地开发服务的 Python 客户端。它不修改 I
 | 包列表 | 已有降级实现 | `status` 无包信息时由设备端 Python 查询 |
 | 元素树与语义选择器 | 取决于目标 App | 先用 Inspector 验证，再作为生产测试依赖 |
 | Inspector | 本机客户端实现 | 默认仅监听 `127.0.0.1`，不改手机端 |
+| USB 隧道 | 客户端封装，待目标环境验收 | 使用外部 `iproxy` 将本机端口转发到手机服务 |
 
 ## 3. 安装、更新与版本控制
 
@@ -196,10 +197,10 @@ Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--hos
 ## 7. 项目部署与日志
 
 ```bat
-py -m asclient --device 192.168.3.17:9096 deploy smoke .\smoke.py --logs 5
+py -m asclient --yes deploy smoke .\smoke.py --logs 5
 py -m asclient --device 192.168.3.17:9096 files smoke
 py -m asclient --device 192.168.3.17:9096 pull smoke .\artifacts\smoke
-py -m asclient --device 192.168.3.17:9096 remove smoke
+py -m asclient --yes remove smoke
 ```
 
 建议将每次部署的控制台输出、截图、日志、设备状态和提交 SHA 存入 CI 工件或测试归档。`pull` 只能下载设备服务列出的实际项目文件；如果项目文件树中不包含资源目录，客户端不会猜测或伪造资源文件。
@@ -209,9 +210,10 @@ py -m asclient --device 192.168.3.17:9096 remove smoke
 1. 设备服务应只运行在可信局域网，不应映射到公网或不受控 Wi-Fi。
 2. 将密码保存于被 Git 忽略的 `asclient.json`，不要写入源代码、批处理文件、日志或截图。CI 中应由受保护的密钥步骤生成临时配置文件。
 3. `eval` 直接执行设备端 Python；它只可用于受信任的维护脚本，禁止接收终端用户输入、网页参数或未审查的 CI 变量。
-4. `push`、`remove`、`rename`、`run` 和 `deploy` 会改变设备状态。生产脚本必须明确项目名，禁止由不可信输入拼接项目名或远程路径。
-5. Inspector 默认本机监听。保持此默认值，且不要在录屏或日志中泄露页面敏感信息。
-6. 自动化账号遵循最小权限原则，测试数据必须可清理、可复现且不包含真实个人数据。
+4. CLI 中 `push`、`remove`、`rename`、`run`、`deploy`、坐标动作、`eval` 和原始 `api` 均要求命令前显式写 `--yes`。生产脚本必须明确项目名，禁止由不可信输入拼接项目名或远程路径。
+5. USB 连接使用 `IProxyTunnel` 或 `py -m asclient tunnel`，并只配置回环地址。详细的设备配对、UDID、端口和防火墙要求见 [USB 隧道运维指南](usb-tunnel.md)。
+6. Inspector 默认本机监听。保持此默认值，且不要在录屏或日志中泄露页面敏感信息。
+7. 自动化账号遵循最小权限原则，测试数据必须可清理、可复现且不包含真实个人数据。
 
 ## 9. 错误处理与故障排查
 
@@ -287,6 +289,8 @@ with Run(device, artifacts_root="artifacts") as run:
 - [ ] 未在代码、仓库、工件或控制台中泄露服务密码或业务敏感数据。
 - [ ] 已测试安装、升级和回滚到上一已验收提交。
 - [ ] 已运行 `py -m unittest discover -s tests -v`，并执行目标 App 真机冒烟测试。
+- [ ] 已确认所有 CLI 状态变更命令都使用 `--yes`，且目标设备地址来自受审查的配置文件。
+- [ ] USB 运行场景已验证设备 UDID、端口映射和主机防火墙策略。
 
 ## 12. 回滚
 

@@ -4,5 +4,13 @@
     "password": "",
     "timeout": 20,
     "retries": 1
+  },
+  "tunnel": {
+    "iproxy": "iproxy",
+    "local_host": "127.0.0.1",
+    "local_port": 9096,
+    "remote_port": 9096,
+    "udid": "",
+    "startup_timeout": 8
   }
 }

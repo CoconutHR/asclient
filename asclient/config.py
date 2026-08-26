@@ -33,3 +33,15 @@ def device_options(config: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("timeout", "retries"):
         if key in result and not isinstance(result[key], (int, float)): raise ValueError(f"device.{key} must be numeric")
     return result
+
+
+def tunnel_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Return validated optional iproxy settings from a config object."""
+    value = config.get("tunnel", {})
+    if not isinstance(value, Mapping): raise ValueError("configuration key 'tunnel' must be an object")
+    result = dict(value)
+    for key in ("iproxy", "udid", "local_host"):
+        if key in result and not isinstance(result[key], str): raise ValueError(f"tunnel.{key} must be a string")
+    for key in ("local_port", "remote_port", "startup_timeout"):
+        if key in result and not isinstance(result[key], (int, float)): raise ValueError(f"tunnel.{key} must be numeric")
+    return result

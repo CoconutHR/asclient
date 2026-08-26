@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.4.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.5.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -45,6 +45,20 @@ print(client.base_url)  # http://192.168.3.17:9096
 from asclient import connect
 device = connect("192.168.3.17:9096", timeout=20)
 ```
+
+### `IProxyTunnel`
+
+管理一个由外部 `iproxy` 提供的 USB 端口转发。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](usb-tunnel.md)。
+
+```python
+from asclient import IProxyTunnel, connect
+
+with IProxyTunnel(local_port=9096, remote_port=9096, udid="") as tunnel:
+    device = connect(tunnel.address)
+    print(device.client.status())
+```
+
+`IProxyTunnel.start()` 启动隧道，`.stop()` 终止其子进程，`.address` 返回如 `127.0.0.1:9096` 的客户端地址。它要求外部 `iproxy` 已安装；找不到时抛 `IProxyNotFoundError`，启动失败时抛 `TunnelError`。
 
 ### 异常
 
@@ -522,8 +536,8 @@ payload = client.json("GET", "/api/node/package")
 CLI 透传命令：
 
 ```bat
-py -m asclient --device 192.168.3.17:9096 api GET /api/node/package
-py -m asclient --device 192.168.3.17:9096 api GET /api/node/dump --params "{\"mode\": \"full\"}"
+py -m asclient --yes --device 192.168.3.17:9096 api GET /api/node/package
+py -m asclient --yes --device 192.168.3.17:9096 api GET /api/node/dump --params "{\"mode\": \"full\"}"
 ```
 
 原始接口不是稳定兼容层。使用前应在目标 AScript 版本上验证，并在应用代码中封装、测试和记录端点版本。
@@ -536,6 +550,15 @@ py -m asclient --device 192.168.3.17:9096 api GET /api/node/dump --params "{\"mo
 py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--timeout SECONDS] <command>
 ```
 
+任何改变设备状态的命令必须在命令前加 `--yes`。这是非交互式确认，便于脚本审计：
+
+```bat
+py -m asclient --yes deploy smoke .\smoke.py --logs 5
+py -m asclient --yes remove smoke
+```
+
+不带 `--yes` 时客户端在发送请求前失败，并打印目标设备和被拒绝的动作。Python 库 API 不会重复要求确认，因为调用者代码本身已是显式授权边界。
+
 | 命令 | 用法 | 作用 |
 | --- | --- | --- |
 | `ping` | `ping` | 探测服务 |
@@ -547,28 +570,29 @@ py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--tim
 | `dump` | `dump [output.xml] [--mode MODE]` | 保存 XML 控件树 |
 | `observe` | `observe [--prefix PREFIX]` | 同时保存截图与 XML |
 | `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |
-| `tap` | `tap X Y [--duration MS]` | 坐标点击 |
-| `swipe` | `swipe X1 Y1 X2 Y2 [--duration MS]` | 坐标滑动 |
-| `input` | `input TEXT [--interval MS]` | 输入文本 |
-| `home` | `home` | Home 动作 |
+| `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--udid UDID] [--iproxy PATH]` | 以前台方式管理 USB `iproxy` 隧道 |
+| `tap` | `--yes tap X Y [--duration MS]` | 坐标点击 |
+| `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS]` | 坐标滑动 |
+| `input` | `--yes input TEXT [--interval MS]` | 输入文本 |
+| `home` | `--yes home` | Home 动作 |
 | `ocr` | `ocr [rect]` | OCR |
 | `findcolor` | `findcolor COLORS [--diff FLOAT]` | 查找颜色 |
 | `compare` | `compare COLORS [--diff FLOAT]` | 比对颜色 |
 | `ls` | `ls` | 列项目 |
-| `create` | `create PROJECT` | 创建项目 |
-| `rename` | `rename PROJECT NEW_NAME` | 重命名项目 |
-| `remove` | `remove PROJECT` | 删除项目 |
+| `create` | `--yes create PROJECT` | 创建项目 |
+| `rename` | `--yes rename PROJECT NEW_NAME` | 重命名项目 |
+| `remove` | `--yes remove PROJECT` | 删除项目 |
 | `files` | `files PROJECT` | 查看项目文件树 |
-| `push` | `push PROJECT SOURCE [REMOTE]` | 上传单文件或目录 |
+| `push` | `--yes push PROJECT SOURCE [REMOTE]` | 上传单文件或目录 |
 | `pull` | `pull PROJECT [OUTPUT]` | 下载项目文件 |
-| `run` / `stop` | `run PROJECT` / `stop` | 启动/停止项目 |
-| `deploy` | `deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]` | 上传、运行、取日志和截图 |
+| `run` / `stop` | `--yes run PROJECT` / `--yes stop` | 启动/停止项目 |
+| `deploy` | `--yes deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]` | 上传、运行、取日志和截图 |
 | `log` | `log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]` | 输出、筛选或 JSONL 落盘实时日志 |
 | `cat` | `cat REMOTE_PATH [OUTPUT]` | 打印或保存远程文件 |
-| `eval` | `eval CODE` | 执行受信任设备端 Python |
-| `api` | `api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
+| `eval` | `--yes eval CODE` | 执行受信任设备端 Python |
+| `api` | `--yes api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
 
-`remove`、`run`、`stop`、`deploy`、`push`、`eval` 和原始 `api` 中的写请求都会改变设备状态。将它们放在明确的运维或测试步骤中，避免作为排错时的随手命令。
+`remove`、`run`、`stop`、`deploy`、`push`、`eval`、`tap`、`swipe`、`input`、`home` 和原始 `api` 都要求 `--yes`，因为 AScript 的原始 GET 路由也可能改变状态。将它们放在明确的运维或测试步骤中，避免作为排错时的随手命令。
 
 ## 13. Inspector API
 

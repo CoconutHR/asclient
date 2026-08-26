@@ -24,3 +24,11 @@ class DeviceOperationError(AScriptError):
 
 class ProtocolError(AScriptError):
     """An invalid WebSocket or AScript response was received."""
+
+
+class TunnelError(AScriptError):
+    """A local USB port-forwarding tunnel could not be started or kept alive."""
+
+
+class IProxyNotFoundError(TunnelError):
+    """The configured iproxy executable is not installed or not executable."""
