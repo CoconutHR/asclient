@@ -597,6 +597,8 @@ py -m asclient --yes remove smoke
 | 命令 | 用法 | 作用 |
 | --- | --- | --- |
 | `ping` | `ping` | 探测服务 |
+| `help` | `help [COMMAND]` | 输出当前语言下的简明说明，不连接设备 |
+| `doctor` | `doctor [--report FILE] [--fix-iproxy PATH] [--yes]` | 诊断本机工具、端口、设备与日志；仅对已验证的 `iproxy` 路径提供经确认的配置修复 |
 | `status` | `status` | 输出设备状态或兼容降级状态 |
 | `scan` | `scan` | 扫描默认地址所在 `/24` |
 | `pkgs` | `pkgs` | 列出设备 Python 包 |

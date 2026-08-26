@@ -79,6 +79,16 @@ py -m asclient doctor --report evidence\doctor.json
 
 `doctor` 默认不会修改电脑或手机。它不会自动安装 `iproxy`、关闭端口占用进程或更改设备设置；这些问题会给出明确解决方案。只有 `doctor --fix-iproxy <绝对路径>` 会请求确认后写入 `tunnel.iproxy`，用于已存在的受信任可执行文件。
 
+`doctor` 发现 `error` 检查项时返回退出码 `1`，其余情况返回 `0`，可用于发布脚本。`warning` 不代表工具自身失败，例如正在运行的 USB 隧道会使本地转发端口显示为已占用。`--report` 输出的 JSON 含 `created_at`、`device` 和 `checks`；每个检查项有 `name`、`status`、`message` 与可选 `detail`，不含 `device.password`。
+
+| 诊断结果 | `doctor` 的边界 | 操作人处理 |
+| --- | --- | --- |
+| 未找到 `iproxy` | 不下载、不安装第三方二进制 | 安装受信任发行版，或以 `--fix-iproxy` 提供已存在的绝对路径 |
+| 本地端口已占用 | 不结束其他程序 | 确认是否已有隧道；否则关闭占用程序或修改本地端口配置 |
+| 控制服务不可达 | 不重启手机服务 | 检查设备地址、密码、服务开关、网络或 USB 配对 |
+| 日志端口不可达 | 不修改设备端日志服务 | 检查 Wi-Fi；USB 时确认未使用 `--no-logs` 且 `10102` 已映射 |
+| `status_api` 降级 | 不修改手机端代码 | 使用 `screen/current_app` 作为连通性证据，保留原始错误供追踪 |
+
 验收标准：
 
 1. `ping` 成功并返回平台信息。
@@ -88,6 +98,8 @@ py -m asclient doctor --report evidence\doctor.json
 5. OCR 至少能识别一项预期文本或图像流程能定位预期模板。
 
 不要把“能 ping 通”当作自动化已可用的证明。
+
+USB 真机验收应使用两个终端：第一个运行 `py -m asclient tunnel` 并保持不退出；第二个依次运行 `doctor`、`status`、`log 10` 和真机集成测试。控制服务与日志端口必须同时成功，不能只以 `status` 成功作为 USB 验收结论。
 
 真机 smoke 使用独立配置文件，避免环境变量和误操作：复制 `tests\integration.example.json` 为 `tests\integration.json`，填入设备信息与已验证的唯一选择器，再把 `enabled` 改为 `true`：
 

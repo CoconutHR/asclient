@@ -42,6 +42,25 @@ iproxy --help
 }
 ```
 
+### macOS 与 Linux 安装与定位
+
+macOS 可使用 Homebrew：
+
+```sh
+brew install libimobiledevice
+which iproxy
+iproxy --help
+```
+
+Linux 应通过发行版的受信任软件源安装 `libimobiledevice`，再执行：
+
+```sh
+command -v iproxy
+iproxy --help
+```
+
+若二进制不在 `PATH`，同样将绝对路径填入 `tunnel.iproxy`。不要将未知来源的下载文件直接加入自动化或 CI 环境。
+
 ## 配置
 
 复制并编辑配置：
@@ -152,7 +171,7 @@ with AScriptTunnel():
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `iproxy executable not found` | 未安装、未加入 PATH 或路径写错 | Windows 执行 `where iproxy`；无结果则安装包含 `iproxy.exe` 的受信任发行版，或将 `tunnel.iproxy` 设为绝对路径 |
+| `未找到 iproxy 可执行文件` / `iproxy executable not found` | 未安装、未加入 PATH 或路径写错 | Windows 执行 `where iproxy`；macOS 执行 `which iproxy`；无结果则安装受信任发行版，或将 `tunnel.iproxy` 设为绝对路径 |
 | `iproxy exited during startup` | USB 未连接、设备未信任、端口冲突或 UDID 错误 | 重新插拔/解锁并信任设备；检查端口和 UDID |
 | 隧道运行但 `status` 失败 | AScript 服务未开启或远端端口不对 | 在手机确认服务；检查 `remote_port` 默认应为 `9096` |
 | `log` 失败 | 日志隧道被关闭、端口冲突或设备端日志服务不可用 | 移除 `--no-logs`，确认 `forward_logs` 为 `true`，检查本机 `10102` 与远端 `10102` |

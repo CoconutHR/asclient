@@ -4,7 +4,7 @@
 
 [CI workflow](../.github/workflows/ci.yml) 在每次推送 `main` 和 Pull Request 时执行：
 
-1. Python 3.10、3.11 安装包。
+1. 在 Ubuntu 与 Windows 的 Python 3.10、3.11 上安装包。
 2. 运行单元测试及默认禁用的真机集成测试。
 3. 构建 wheel 并上传为 workflow artifact。
 
@@ -53,6 +53,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows-smoke.ps1 -Install
 5. 合并到 `main`，确认 GitHub Actions 通过。
 6. 使用已验证提交创建 Git tag，例如 `v0.6.0`。
 7. 在 Windows 从新克隆或干净虚拟环境执行安装验证。
+8. 在目标真机运行 `py -m asclient doctor --report artifacts\doctor.json`；USB 场景还须完成 `tunnel`、`status` 和 `log` 验收。
 
 ## 回滚
 
