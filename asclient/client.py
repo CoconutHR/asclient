@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Optional
 
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
+from .runtime import device_lock
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,10 @@ class AScriptClient:
     @property
     def base_url(self) -> str:
         return f"http://{self.address}"
+
+    def locked(self):
+        """Return the process-local mutex for actions against this device."""
+        return device_lock(self.address)
 
     def _headers(self, extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
         result = dict(extra or {})
@@ -237,7 +242,7 @@ class AScriptClient:
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
             raise ValueError("code is empty")
-        value = self._ok(self.json("POST", "/api/gp/eval", form={"code": code, "image": image}, timeout=60)).get("data")
+        with self.locked(): value = self._ok(self.json("POST", "/api/gp/eval", form={"code": code, "image": image}, timeout=60)).get("data")
         if isinstance(value, str):
             try:
                 return json.loads(value)
@@ -246,16 +251,16 @@ class AScriptClient:
         return value
 
     def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
-        return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
+        with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
     def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration_ms: int = 200) -> Any:
-        return self.eval_python("from ascript.ios.action import slide\nslide(%r, %r, %r, %r, %r)\n_result=True" % (x1, y1, x2, y2, duration_ms))
+        with self.locked(): return self.eval_python("from ascript.ios.action import slide\nslide(%r, %r, %r, %r, %r)\n_result=True" % (x1, y1, x2, y2, duration_ms))
 
     def input_text(self, text: str, *, interval_ms: int = 120) -> Any:
-        return self.eval_python("from ascript.ios.action import input\ninput(%s, %r)\n_result=True" % (json.dumps(text, ensure_ascii=False), interval_ms))
+        with self.locked(): return self.eval_python("from ascript.ios.action import input\ninput(%s, %r)\n_result=True" % (json.dumps(text, ensure_ascii=False), interval_ms))
 
     def home(self) -> Any:
-        return self.eval_python("from ascript.ios.action import home\nhome()\n_result=True")
+        with self.locked(): return self.eval_python("from ascript.ios.action import home\nhome()\n_result=True")
 
     def _device_screenshot_path(self) -> str:
         items = self._ok(self.json("GET", "/api/screen/capture/list", params={"capture": "true"})).get("data") or []
@@ -293,13 +298,13 @@ class AScriptClient:
         return self._ok(self.json("POST", "/api/module/list")).get("data", [])
 
     def create_project(self, name: str) -> None:
-        self._ok(self.json("GET", "/api/module/create", params={"name": self._name(name)}))
+        with self.locked(): self._ok(self.json("GET", "/api/module/create", params={"name": self._name(name)}))
 
     def rename_project(self, name: str, new_name: str) -> None:
-        self._ok(self.json("GET", "/api/module/rname", params={"name": self._name(name), "rename": self._name(new_name)}))
+        with self.locked(): self._ok(self.json("GET", "/api/module/rname", params={"name": self._name(name), "rename": self._name(new_name)}))
 
     def remove_project(self, name: str) -> None:
-        self._ok(self.json("GET", "/api/module/remove", params={"name": self._name(name)}))
+        with self.locked(): self._ok(self.json("GET", "/api/module/remove", params={"name": self._name(name)}))
 
     def project_files(self, name: str) -> Any:
         return self._ok(self.json("GET", "/api/module/files", params={"name": self._name(name)})).get("data", [])
@@ -343,38 +348,39 @@ class AScriptClient:
         return result
 
     def run_project(self, name: str) -> None:
-        self._ok(self.json("GET", "/api/module/run", params={"name": self._name(name)}))
+        with self.locked(): self._ok(self.json("GET", "/api/module/run", params={"name": self._name(name)}))
 
     def stop_project(self) -> None:
-        self._ok(self.json("GET", "/api/module/stop"))
+        with self.locked(): self._ok(self.json("GET", "/api/module/stop"))
 
     def read_file(self, remote_path: str) -> bytes:
         return self.request("GET", "/api/file/get", params={"path": remote_path}, timeout=30)
 
     def save_text(self, remote_path: str, content: str) -> None:
-        self._ok(self.json("POST", "/api/file/save", form={"path": remote_path, "content": content}))
+        with self.locked(): self._ok(self.json("POST", "/api/file/save", form={"path": remote_path, "content": content}))
 
     def create_remote(self, parent: str, name: str, *, directory: bool = False) -> None:
-        self._ok(self.json("GET", "/api/file/create", params={"path": parent, "name": name, "type": "floder" if directory else "file"}))
+        with self.locked(): self._ok(self.json("GET", "/api/file/create", params={"path": parent, "name": name, "type": "floder" if directory else "file"}))
 
     def remove_remote(self, path: str) -> None:
-        self._ok(self.json("GET", "/api/file/remove", params={"path": path}))
+        with self.locked(): self._ok(self.json("GET", "/api/file/remove", params={"path": path}))
 
     def upload_file(self, project: str, local_path: str | Path, remote_path: Optional[str] = None) -> None:
         project, local_path = self._name(project), Path(local_path)
         if not local_path.is_file():
             raise FileNotFoundError(local_path)
         relative = self._relative(remote_path or local_path.name)
-        try:
-            self.create_project(project)
-        except DeviceOperationError:
-            pass
-        boundary = "----ASClient" + secrets.token_hex(16)
-        filename = urllib.parse.quote(local_path.name, safe="")
-        prefix = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
-        body = prefix + local_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
-        result = self.json("POST", "/api/file/upload", params={"path": f"~/modules/{project}/{relative}", "overwrite": "true"}, data=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, timeout=60)
-        self._ok(result)
+        with self.locked():
+            try:
+                self.create_project(project)
+            except DeviceOperationError:
+                pass
+            boundary = "----ASClient" + secrets.token_hex(16)
+            filename = urllib.parse.quote(local_path.name, safe="")
+            prefix = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+            body = prefix + local_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+            result = self.json("POST", "/api/file/upload", params={"path": f"~/modules/{project}/{relative}", "overwrite": "true"}, data=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, timeout=60)
+            self._ok(result)
 
     def upload_tree(self, project: str, directory: str | Path) -> int:
         directory = Path(directory)
@@ -386,12 +392,13 @@ class AScriptClient:
         return len(files)
 
     def deploy(self, project: str, entry_file: str | Path, *, log_seconds: float = 5.0) -> tuple[list[LogEntry], bytes]:
-        self.upload_file(project, entry_file, "__init__.py")
-        logs: list[LogEntry] = []
-        stop = threading.Event()
-        thread = threading.Thread(target=lambda: logs.extend(self.logs(duration=log_seconds, stop_event=stop)), daemon=True)
-        thread.start(); time.sleep(0.2); self.run_project(project); thread.join(log_seconds + 3); stop.set()
-        return logs, self.screenshot()
+        with self.locked():
+            self.upload_file(project, entry_file, "__init__.py")
+            logs: list[LogEntry] = []
+            stop = threading.Event()
+            thread = threading.Thread(target=lambda: logs.extend(self.logs(duration=log_seconds, stop_event=stop)), daemon=True)
+            thread.start(); time.sleep(0.2); self.run_project(project); thread.join(log_seconds + 3); stop.set()
+            return logs, self.screenshot()
 
     def logs(self, *, duration: Optional[float] = None, stop_event: Optional[threading.Event] = None, reconnects: int = 0, reconnect_delay: float = 1.0) -> Iterator[LogEntry]:
         """Yield device stdout/stderr events from port 10102.

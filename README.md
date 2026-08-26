@@ -49,6 +49,18 @@ device.selector().name("login_button")
 device.selector().at(200, 600)
 ```
 
+For production workflows, `Run` serializes actions for one device and writes
+step evidence to a distinct artifact directory:
+
+```python
+from asclient import Run, connect
+
+device = connect("192.168.3.17:9096")
+with Run(device) as run:
+    login = run.assert_unique(device.selector().name("login_button"))
+    run.step("open_login", login.click, capture_after=True)
+```
+
 `py -m asclient --device 192.168.3.17:9096 inspect` starts a loopback-only
 browser Inspector. It displays the current screenshot, control tree, properties
 and a copyable selector. It needs no mobile-side installation or modification.

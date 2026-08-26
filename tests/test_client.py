@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import urlopen
 
-from asclient import AScriptClient, Device, DeviceOperationError, connect
+from asclient import AScriptClient, Device, DeviceOperationError, Run, connect
 from asclient.config import device_options, load_config
 
 
@@ -136,6 +136,17 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(artifacts["screenshot"].read_bytes(), b"PNG")
             self.assertEqual(artifacts["xml"].read_text(encoding="utf-8"), "<App/>")
             self.assertTrue(artifacts["context"].is_file())
+
+    def test_run_records_steps_and_failure_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with Run(Device(self.client), directory, run_id="unit-run") as run:
+                element = run.assert_unique(Device(self.client).selector().name("confirm"), name="confirm_is_unique")
+                self.assertEqual(element.info["name"], "confirm")
+                with self.assertRaises(RuntimeError): run.step("expected_failure", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+            manifest = json.loads((Path(directory) / "unit-run" / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["outcome"], "passed")
+            self.assertEqual(manifest["steps"][1]["outcome"], "failed")
+            self.assertTrue((Path(directory) / "unit-run" / "expected_failure_failure.json").is_file())
 
     def test_inspector_serves_a_loopback_snapshot(self):
         from asclient.inspector import serve

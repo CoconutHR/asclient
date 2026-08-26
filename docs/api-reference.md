@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.3.2`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.4.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -304,7 +304,47 @@ submit.click()
 
 `UiObject` 是快照，不会在页面跳转后自动重新定位。页面发生变化后请重新使用 `UiCollection.get()` 或 `device.find()` 查询。
 
-## 6. 交互动作与设备端代码
+## 6. 可靠执行与工件
+
+### `Run(device, artifacts_root="artifacts", run_id=None)`
+
+为一个 `Device` 或 `AScriptClient` 创建可追溯的运行上下文。每个 Run 创建独立目录：
+
+```text
+artifacts/
+  20260827_002000_a1b2c3d4/
+    manifest.json
+    login_failure.png
+    login_failure.xml
+    login_failure.json
+```
+
+```python
+from asclient import Run, connect
+
+device = connect("192.168.3.17:9096")
+with Run(device, artifacts_root="artifacts") as run:
+    login = run.assert_unique(device.selector().name("login_button"))
+    run.step("open_login", login.click, capture_before=True, capture_after=True)
+    run.wait(device.selector().name("home_screen"), timeout=10, name="wait_home")
+```
+
+| 成员 | 行为 |
+| --- | --- |
+| `step(name, action, capture_before=False, capture_after=False)` | 在设备锁内执行 action，记录耗时与结果；失败时自动采集诊断证据后重新抛出原异常 |
+| `capture(label, mode="smart")` | 立即采集截图、XML 和设备上下文 |
+| `wait(selector, timeout=10, name="wait")` | 等待元素出现；超时自动采集失败证据 |
+| `assert_unique(selector, name="assert_unique")` | 断言 selector 恰好命中一个元素，并返回该元素 |
+
+`manifest.json` 会在每个步骤结束后更新，记录运行 ID、设备地址、开始/结束时间、步骤耗时、结果、异常和实际写入的证据路径。
+
+### `AScriptClient.locked()`
+
+返回同一 Python 进程内、按设备 `HOST:PORT` 共享的可重入互斥上下文。`tap`、`swipe`、`input_text`、`home`、`eval_python`、项目运行/部署、文件写入和删除操作已自动使用它；通常不需要手动调用。
+
+该锁不跨 Python 进程、CI runner 或物理主机。多进程并行执行同一手机时，仍需由 CI 队列、文件锁或外部调度器保证每台设备同时只有一个作业。
+
+## 7. 交互动作与设备端代码
 
 ### `tap(x, y, *, duration_ms=20)`
 
@@ -341,7 +381,7 @@ assert result == 2
 
 这是高风险维护接口。禁止将不可信输入拼接到 `code` 中，也不要将其暴露为 Web/CI 参数。
 
-## 7. OCR 与图色 API
+## 8. OCR 与图色 API
 
 ### `ocr(rect=None) -> Any`
 
@@ -376,7 +416,7 @@ result = client.find_colors("#FFFFFF,0|10|#000000", diff=0.98)
 | `image` | 设备端图片路径；留空时自动先请求当前截图路径 |
 | `name` | 任务名称，默认 `asclient` |
 
-## 8. 项目与远程文件 API
+## 9. 项目与远程文件 API
 
 项目名必须是一个单独目录名，不能包含 `/`、`\\`、`.` 或 `..`。相对远程路径同样禁止父目录逃逸。
 
@@ -430,7 +470,7 @@ for entry in logs:
 
 `deploy()` 会改变设备项目内容和运行状态，禁止对生产业务项目使用临时项目名覆盖。
 
-## 9. 日志 API
+## 10. 日志 API
 
 ### `logs(*, duration=None, stop_event=None, reconnects=0, reconnect_delay=1.0) -> Iterator[LogEntry]`
 
@@ -461,7 +501,7 @@ for entry in client.logs(duration=10):
 
 等待首条包含 `pattern` 的日志；`regex=True` 时将 pattern 视为正则表达式。适合部署后等待明确的 `READY` 标记，不应替代业务页面断言。
 
-## 10. 原始 HTTP API
+## 11. 原始 HTTP API
 
 ### `request(method, path, *, params=None, form=None, data=None, headers=None, timeout=None) -> bytes`
 
@@ -488,7 +528,7 @@ py -m asclient --device 192.168.3.17:9096 api GET /api/node/dump --params "{\"mo
 
 原始接口不是稳定兼容层。使用前应在目标 AScript 版本上验证，并在应用代码中封装、测试和记录端点版本。
 
-## 11. CLI 参考
+## 12. CLI 参考
 
 默认从当前目录的 `asclient.json` 读取连接配置。可复制根目录的 `asclient.example.json` 后填写设备信息；命令行参数只用于单次覆盖。所有命令共用：
 
@@ -530,7 +570,7 @@ py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--tim
 
 `remove`、`run`、`stop`、`deploy`、`push`、`eval` 和原始 `api` 中的写请求都会改变设备状态。将它们放在明确的运维或测试步骤中，避免作为排错时的随手命令。
 
-## 12. Inspector API
+## 13. Inspector API
 
 CLI `inspect` 使用 [inspector.py](../asclient/inspector.py) 的公开函数：
 

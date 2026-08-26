@@ -263,6 +263,20 @@ automation-project/
 
 将选择器集中到页面对象中，不要散落在测试用例。每个页面对象操作后应返回可验证的页面状态，而不是只执行点击。例如“提交订单”应等待订单成功标识出现，而不是 `sleep(2)` 后直接判定通过。
 
+每个生产测试用例应使用 `Run` 包裹，确保失败可复现：
+
+```python
+from asclient import Run, connect
+
+device = connect("192.168.3.17:9096")
+with Run(device, artifacts_root="artifacts") as run:
+    submit = run.assert_unique(device.selector().name("checkout_submit"))
+    run.step("submit_order", submit.click, capture_after=True)
+    run.wait(device.selector().name("order_success"), timeout=15, name="wait_success")
+```
+
+失败步骤会自动写入截图、XML、状态和 `manifest.json`。状态变更 API 已在同一 Python 进程内按设备地址串行化；不要因此在多个终端或 CI worker 上同时使用同一手机，跨进程互斥仍需由调度层负责。
+
 ## 11. 发布前检查表
 
 - [ ] 已锁定并记录 ASClient Git 提交和包版本。
