@@ -10,17 +10,19 @@ from .errors import IProxyNotFoundError, TunnelError
 
 
 def _iproxy_not_found_message(executable: str) -> str:
-    """Return an actionable platform-specific missing-iproxy error."""
-    configured = f"iproxy executable not found: {executable!r}."
+    """Return an actionable bilingual platform-specific missing-iproxy error."""
+    configured = f"未找到 iproxy 可执行文件: {executable!r}. / iproxy executable not found: {executable!r}."
     if sys.platform == "win32":
         return (
-            f"{configured} On Windows, install a trusted libimobiledevice build that includes iproxy.exe, "
-            "then either add its directory to PATH and verify with 'where iproxy', or set "
-            '"tunnel.iproxy": "C:\\\\tools\\\\libimobiledevice\\\\iproxy.exe" in asclient.json.'
+            f"{configured} Windows：请安装包含 iproxy.exe 的可信 libimobiledevice 发行版；然后将其目录加入 PATH 并执行 "
+            "'where iproxy' 验证，或在 asclient.json 中设置 "
+            '"tunnel.iproxy": "C:\\\\tools\\\\libimobiledevice\\\\iproxy.exe"。 '
+            "On Windows, install a trusted libimobiledevice build that includes iproxy.exe; then add its directory "
+            "to PATH and verify with 'where iproxy', or configure the absolute executable path in asclient.json."
         )
     if sys.platform == "darwin":
-        return f"{configured} On macOS, install libimobiledevice (for example: 'brew install libimobiledevice') and verify with 'which iproxy', or set tunnel.iproxy to its absolute path."
-    return f"{configured} Install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."
+        return f"{configured} macOS：安装 libimobiledevice（例如 'brew install libimobiledevice'）后执行 'which iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。 On macOS, install libimobiledevice (for example: 'brew install libimobiledevice') and verify with 'which iproxy', or set tunnel.iproxy to its absolute path."
+    return f"{configured} Linux：安装发行版提供的 libimobiledevice 包后执行 'command -v iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。 On Linux, install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."
 
 
 @dataclass

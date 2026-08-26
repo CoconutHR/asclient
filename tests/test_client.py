@@ -147,6 +147,7 @@ class ClientTests(unittest.TestCase):
     def test_missing_iproxy_message_is_actionable_on_windows(self):
         with patch("asclient.tunnel.sys.platform", "win32"):
             message = _iproxy_not_found_message("iproxy")
+        self.assertIn("未找到 iproxy", message)
         self.assertIn("where iproxy", message)
         self.assertIn("iproxy.exe", message)
         self.assertIn("tunnel.iproxy", message)
