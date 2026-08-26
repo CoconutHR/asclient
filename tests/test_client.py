@@ -30,6 +30,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path); Handler.calls.append(("GET", parsed.path, parse_qs(parsed.query), b""))
         if parsed.path == "/api/screen/capture": return self._reply(b"PNG", content_type="image/png")
         if parsed.path == "/api/node/dump": return self._reply(b"<App/>", content_type="application/xml")
+        if parsed.path == "/api/node/package": return self._reply({"code": 1, "data": {"name": "Example App", "bundle_id": "com.example.app", "pid": 42}})
         if parsed.path == "/api/tool/view/dump": return self._reply({"code": 1, "data": {"config": {"display": {"widthPixels": 100, "heightPixels": 200}}, "views": [{"type": "XCUIElementTypeButton", "name": "confirm", "label": "Confirm", "x": 10, "y": 20, "width": 30, "height": 40, "childs": []}]}})
         if parsed.path == "/api/module/create": return self._reply({"code": 1})
         self._reply({"code": 1, "data": []})
@@ -141,9 +142,14 @@ class ClientTests(unittest.TestCase):
         server = serve(self.client, open_browser=False)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=2) as response:
+                page = response.read().decode("utf-8")
+            self.assertIn('id="appmeta"', page)
+            self.assertIn('id="divider-left"', page)
             with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
                 snapshot = json.loads(response.read())
             self.assertEqual(snapshot["tree"]["views"][0]["name"], "confirm")
+            self.assertEqual(snapshot["app"]["bundle_id"], "com.example.app")
             self.assertEqual(base64.b64decode(snapshot["image"]), b"PNG")
             selector = quote(json.dumps({"sel": [{"key": "name", "params": "confirm"}], "find": 99999}))
             with urlopen(f"http://127.0.0.1:{server.server_port}/api/selector?selector={selector}", timeout=2) as response:

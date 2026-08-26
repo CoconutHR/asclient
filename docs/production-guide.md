@@ -185,11 +185,11 @@ py -m asclient inspect
 
 浏览器打开后：
 
-1. 选择 `Smart`，点击 Refresh，确认树中有实际节点。
+1. 选择 `Smart`，点击 Refresh，确认顶部显示的 App 名称、Bundle ID、PID 与待测 App 一致，且树中有实际节点。
 2. 点击截图或左侧树中的节点，核对矩形、`name`、`label`、`type` 和可见状态。
 3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
-5. `Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
+5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 

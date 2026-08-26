@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.3.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.3.1`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -551,6 +551,6 @@ run_forever(client, host="127.0.0.1", port=0)
 | `serve(client, host="127.0.0.1", port=0, open_browser=True)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口 |
 | `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
 
-Inspector 只应绑定 `127.0.0.1`。它提供当前页面截图和节点信息，不需要、也不应作为局域网服务使用。
+Inspector 只应绑定 `127.0.0.1`。它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。不需要、也不应作为局域网服务使用。
 
 页面中的 **Verify selector** 按钮会以只读方式查询当前候选选择器的实际匹配数。只有结果为 `1` 时，才应将其作为代码候选；该按钮不会点击或修改设备状态。
