@@ -78,9 +78,12 @@ def main(argv: list[str] | None = None) -> int:
             stamp = time.strftime("%Y%m%d_%H%M%S"); image, xml = Path(f"{args.prefix}_{stamp}.png"), Path(f"{args.prefix}_{stamp}.xml")
             print(client.save_screenshot(image)); xml.write_text(client.ui_xml(), encoding="utf-8"); print(xml.resolve())
         elif cmd == "inspect":
-            from .inspector import run_forever
-            print("Inspector is running. Press Ctrl+C to stop.")
-            run_forever(client, host=args.host, port=args.port, open_browser=not args.no_browser)
+            from .inspector import serve
+            server = serve(client, host=args.host, port=args.port, open_browser=not args.no_browser)
+            print(f"Inspector is running at http://{args.host}:{server.server_port}/. Press Ctrl+C to stop.")
+            try: server.serve_forever()
+            except KeyboardInterrupt: pass
+            finally: server.server_close()
         elif cmd == "eval": _out(client.eval_python(args.code))
         elif cmd == "cat":
             data = client.read_file(args.path)

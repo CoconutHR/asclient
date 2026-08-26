@@ -157,6 +157,19 @@ class ClientTests(unittest.TestCase):
         finally:
             server.shutdown(); server.server_close()
 
+    def test_inspector_ignores_a_closed_browser_socket(self):
+        from asclient.inspector import serve
+        server = serve(self.client, open_browser=False)
+        handler = object.__new__(server.RequestHandlerClass)
+        handler.send_response = lambda *args: None
+        handler.send_header = lambda *args: None
+        handler.end_headers = lambda: None
+        class ClosedWriter:
+            def write(self, value): raise ConnectionAbortedError("browser closed")
+        handler.wfile = ClosedWriter()
+        self.assertFalse(handler._send(200, b"snapshot", "text/plain"))
+        server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

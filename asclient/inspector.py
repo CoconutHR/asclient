@@ -47,8 +47,18 @@ setInterval(()=>{if($('live').checked)refresh()},1500);refresh();
 def serve(client: "AScriptClient", *, host: str = "127.0.0.1", port: int = 0, open_browser: bool = True) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None: pass
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
-            self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        def _send(self, status: int, body: bytes, content_type: str) -> bool:
+            """Return false when a browser abandons an in-flight response.
+
+            This is expected during refresh/navigation, especially on Windows;
+            attempting an error response on the same closed socket only creates
+            noisy terminal tracebacks.
+            """
+            try:
+                self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                return False
+            return True
         def do_GET(self) -> None:
             parsed = urlparse(self.path); path, query = parsed.path, parse_qs(parsed.query)
             if path == "/": self._send(200, _PAGE.encode(), "text/html; charset=utf-8"); return
