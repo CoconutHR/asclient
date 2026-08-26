@@ -1,0 +1,97 @@
+import json
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from asclient import AScriptClient, DeviceOperationError
+
+
+class Handler(BaseHTTPRequestHandler):
+    calls = []
+
+    def log_message(self, *args):
+        pass
+
+    def _body(self):
+        return self.rfile.read(int(self.headers.get("Content-Length", 0)))
+
+    def _reply(self, value, status=200, content_type="application/json"):
+        raw = value if isinstance(value, bytes) else json.dumps(value).encode()
+        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+
+    def do_GET(self):
+        parsed = urlparse(self.path); Handler.calls.append(("GET", parsed.path, parse_qs(parsed.query), b""))
+        if parsed.path == "/api/screen/capture": return self._reply(b"PNG", content_type="image/png")
+        if parsed.path == "/api/node/dump": return self._reply(b"<App/>", content_type="application/xml")
+        if parsed.path == "/api/module/create": return self._reply({"code": 1})
+        self._reply({"code": 1, "data": []})
+
+    def do_POST(self):
+        parsed = urlparse(self.path); body = self._body(); Handler.calls.append(("POST", parsed.path, parse_qs(parsed.query), body))
+        if parsed.path == "/api/model/pip": return self._reply(b"")
+        if parsed.path == "/api/gp/eval": return self._reply({"code": 1, "data": "true"})
+        if parsed.path == "/api/bad": return self._reply({"code": -1, "msg": "bad request"})
+        self._reply({"code": 1, "data": []})
+
+
+class ClientTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True); cls.thread.start()
+        cls.client = AScriptClient(f"127.0.0.1:{cls.server.server_port}", retries=0)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close()
+
+    def setUp(self):
+        Handler.calls.clear()
+
+    def test_ping_screenshot_and_ui_xml(self):
+        self.assertEqual(self.client.ping(), "iOS")
+        self.assertEqual(self.client.screenshot(), b"PNG")
+        self.assertEqual(self.client.ui_xml(), "<App/>")
+
+    def test_upload_builds_multipart_and_safe_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "main.py"; source.write_text("print(1)", encoding="utf-8")
+            self.client.upload_file("demo", source, "src/main.py")
+        upload = next(call for call in Handler.calls if call[1] == "/api/file/upload")
+        self.assertEqual(upload[2]["path"], ["~/modules/demo/src/main.py"])
+        self.assertIn(b"print(1)", upload[3])
+        with self.assertRaises(ValueError): self.client.upload_file("../bad", source)
+
+    def test_eval_actions_are_encoded(self):
+        self.client.input_text("a'\n中文")
+        call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
+        self.assertIn(b"ascript.ios.action", call[3])
+
+    def test_operation_error(self):
+        with self.assertRaises(DeviceOperationError): self.client._ok({"code": -1, "msg": "bad request"})
+
+    def test_status_falls_back_when_the_device_reports_a_status_error(self):
+        original = self.client.json
+        def fake_json(method, path, **kwargs):
+            if path == "/api/status": return {"code": -1, "msg": "ObjCStrInstance object is not callable"}
+            if path == "/api/screen/size": return {"code": 1, "data": {"width": 100, "height": 200}}
+            if path == "/api/node/package": return {"code": 1, "data": {"bundle_id": "example"}}
+            return original(method, path, **kwargs)
+        self.client.json = fake_json
+        status = self.client.status()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["screen"]["width"], 100)
+
+    def test_packages_uses_eval_when_status_has_no_package_list(self):
+        original_status, original_eval = self.client.status, self.client.eval_python
+        self.client.status = lambda: {"available": True}
+        self.client.eval_python = lambda code: [["numpy", "1.0"], ["requests", "2.0"]]
+        self.assertEqual(self.client.packages(), [["numpy", "1.0"], ["requests", "2.0"]])
+        self.client.status, self.client.eval_python = original_status, original_eval
+
+
+if __name__ == "__main__":
+    unittest.main()
