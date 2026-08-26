@@ -14,6 +14,21 @@ device.upload_file("demo", "__init__.py")
 device.run_project("demo")
 ```
 
+## Configuration
+
+Copy `asclient.example.json` to `asclient.json`, then fill in the device. The
+real file is ignored by Git, including its optional password.
+
+```bat
+copy asclient.example.json asclient.json
+py -m asclient status
+```
+
+Command-line `--device`, `--password` and `--timeout` override the file for a
+single invocation. For real-device smoke checks, copy
+`tests\integration.example.json` to `tests\integration.json`, set
+`enabled` to `true`, and run `py -m unittest tests.test_integration -v`.
+
 ## Object API
 
 The service stays on the phone; the client supplies an automation API modelled

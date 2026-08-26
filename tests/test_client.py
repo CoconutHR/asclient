@@ -6,9 +6,11 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.parse import quote
 from urllib.request import urlopen
 
 from asclient import AScriptClient, Device, DeviceOperationError, connect
+from asclient.config import device_options, load_config
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -119,6 +121,21 @@ class ClientTests(unittest.TestCase):
     def test_connect_returns_a_device_facade(self):
         self.assertIsInstance(connect(f"127.0.0.1:{self.server.server_port}", retries=0), Device)
 
+    def test_json_configuration_is_validated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asclient.json"
+            path.write_text('{"device": {"address": "127.0.0.1:9096", "timeout": 20}}', encoding="utf-8")
+            self.assertEqual(device_options(load_config(path))["address"], "127.0.0.1:9096")
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaises(ValueError): load_config(path)
+
+    def test_capture_artifacts_saves_available_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = self.client.capture_artifacts(directory)
+            self.assertEqual(artifacts["screenshot"].read_bytes(), b"PNG")
+            self.assertEqual(artifacts["xml"].read_text(encoding="utf-8"), "<App/>")
+            self.assertTrue(artifacts["context"].is_file())
+
     def test_inspector_serves_a_loopback_snapshot(self):
         from asclient.inspector import serve
         server = serve(self.client, open_browser=False)
@@ -128,6 +145,9 @@ class ClientTests(unittest.TestCase):
                 snapshot = json.loads(response.read())
             self.assertEqual(snapshot["tree"]["views"][0]["name"], "confirm")
             self.assertEqual(base64.b64decode(snapshot["image"]), b"PNG")
+            selector = quote(json.dumps({"sel": [{"key": "name", "params": "confirm"}], "find": 99999}))
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/selector?selector={selector}", timeout=2) as response:
+                self.assertEqual(json.loads(response.read())["count"], 1)
         finally:
             server.shutdown(); server.server_close()
 

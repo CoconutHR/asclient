@@ -38,8 +38,11 @@ ASClient 是 AScript iOS 本地开发服务的 Python 客户端。它不修改 I
 ```bat
 git pull --ff-only
 py -m pip install --user --upgrade .
-py -m asclient --device 192.168.3.17:9096 status
+copy asclient.example.json asclient.json
+py -m asclient status
 ```
+
+编辑 `asclient.json` 中的 `device.address`、`device.password`、`device.timeout` 和 `device.retries`。真实配置已被 `.gitignore` 排除，不应提交。单次临时覆盖可使用 `--device`、`--password` 或 `--timeout`。
 
 使用 `py -m asclient`，不要依赖 Windows `Scripts` 目录是否已加入 `PATH`。`asc` 命令仅在该目录已加入 `PATH` 时可用。
 
@@ -59,11 +62,11 @@ py -m unittest discover -s tests -v
 每次新设备、网络切换或 AScript 更新后，先执行：
 
 ```bat
-py -m asclient --device 192.168.3.17:9096 ping
-py -m asclient --device 192.168.3.17:9096 status
-py -m asclient --device 192.168.3.17:9096 shot evidence\baseline.png
-py -m asclient --device 192.168.3.17:9096 dump evidence\baseline.xml
-py -m asclient --device 192.168.3.17:9096 ocr
+py -m asclient ping
+py -m asclient status
+py -m asclient shot evidence\baseline.png
+py -m asclient dump evidence\baseline.xml
+py -m asclient ocr
 ```
 
 验收标准：
@@ -75,6 +78,14 @@ py -m asclient --device 192.168.3.17:9096 ocr
 5. OCR 至少能识别一项预期文本或图像流程能定位预期模板。
 
 不要把“能 ping 通”当作自动化已可用的证明。
+
+真机 smoke 使用独立配置文件，避免环境变量和误操作：复制 `tests\integration.example.json` 为 `tests\integration.json`，填入设备信息与已验证的唯一选择器，再把 `enabled` 改为 `true`：
+
+```bat
+py -m unittest discover -s tests -p test_integration.py -v
+```
+
+该套件默认只读取设备状态、截图、树、日志端口与可选选择器，并将证据写入 `artifacts\integration`；不执行点击、输入、上传、删除或部署。
 
 ## 5. Python 自动化 API
 
@@ -169,16 +180,16 @@ OCR 返回的坐标可能是物理像素，而节点树和 `tap` 通常使用 AS
 在目标 App 已打开到待分析页面时执行：
 
 ```bat
-py -m asclient --device 192.168.3.17:9096 inspect
+py -m asclient inspect
 ```
 
 浏览器打开后：
 
 1. 选择 `Smart`，点击 Refresh，确认树中有实际节点。
 2. 点击截图或左侧树中的节点，核对矩形、`name`、`label`、`type` 和可见状态。
-3. 使用页面生成的选择器作为起点；将其改为唯一、稳定的组合。
+3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
-5. `Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。
+5. `Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 
@@ -196,7 +207,7 @@ py -m asclient --device 192.168.3.17:9096 remove smoke
 ## 8. 安全要求
 
 1. 设备服务应只运行在可信局域网，不应映射到公网或不受控 Wi-Fi。
-2. 使用 `ASC_PASSWORD` 或 `--password` 时，不要把密码写入源代码、批处理文件、日志或截图。优先由 CI 的密钥变量注入。
+2. 将密码保存于被 Git 忽略的 `asclient.json`，不要写入源代码、批处理文件、日志或截图。CI 中应由受保护的密钥步骤生成临时配置文件。
 3. `eval` 直接执行设备端 Python；它只可用于受信任的维护脚本，禁止接收终端用户输入、网页参数或未审查的 CI 变量。
 4. `push`、`remove`、`rename`、`run` 和 `deploy` 会改变设备状态。生产脚本必须明确项目名，禁止由不可信输入拼接项目名或远程路径。
 5. Inspector 默认本机监听。保持此默认值，且不要在录屏或日志中泄露页面敏感信息。
@@ -271,7 +282,7 @@ automation-project/
 git log --oneline
 git checkout <上一已验收提交>
 py -m pip install --user --upgrade .
-py -m asclient --device 192.168.3.17:9096 status
+py -m asclient status
 ```
 
 回滚前保留失败版本的提交 SHA、命令输出和工件。不要通过手改 `site-packages` 回滚；这会造成版本不可追踪，且下次安装会被覆盖。

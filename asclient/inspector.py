@@ -11,6 +11,7 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, urlparse
 
 if TYPE_CHECKING:
     from .client import AScriptClient
@@ -27,9 +28,11 @@ function label(n){return [n.type,n.name||n.label||n.value||n.text].filter(Boolea
 function rect(n){return n.rect||{left:n.x||0,top:n.y||0,right:(n.x||0)+(n.width||0),bottom:(n.y||0)+(n.height||0)}}
 function renderTree(){let q=$('search').value.toLowerCase(),out='';for(const n of nodes){if(q&&!label(n).toLowerCase().includes(q))continue;out+=`<button class="${selected===n._key?'active':''}" style="padding-left:${n._depth*16+4}px" onclick="pick(${n._key})">${escapeHtml(label(n)||'(unnamed)')}</button>`}$('tree').innerHTML=out}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function pick(k){selected=k;let n=nodes[k],r=rect(n),cfg=snapshot.tree.config||{},w=(cfg.display||{}).widthPixels||1,h=(cfg.display||{}).heightPixels||1,phone=$('phone');let box=document.createElement('div');box.className='box';box.style.left=(r.left/w*100)+'%';box.style.top=(r.top/h*100)+'%';box.style.width=((r.right-r.left)/w*100)+'%';box.style.height=((r.bottom-r.top)/h*100)+'%';phone.querySelectorAll('.box').forEach(e=>e.remove());phone.append(box);let code=candidate(n);$('details').innerHTML='<h3>'+escapeHtml(label(n))+'</h3>'+Object.entries(n).filter(([k])=>!k.startsWith('_')&&k!=='childs'&&k!=='rect').map(([k,v])=>'<div class="prop"><b>'+escapeHtml(k)+'</b><span>'+escapeHtml(typeof v==='object'?JSON.stringify(v):v)+'</span></div>').join('')+'<h4>Python selector</h4><pre>'+escapeHtml(code)+'</pre><button onclick="copyCode()">Copy selector</button>';renderTree()}
+function pick(k){selected=k;let n=nodes[k],r=rect(n),cfg=snapshot.tree.config||{},w=(cfg.display||{}).widthPixels||1,h=(cfg.display||{}).heightPixels||1,phone=$('phone');let box=document.createElement('div');box.className='box';box.style.left=(r.left/w*100)+'%';box.style.top=(r.top/h*100)+'%';box.style.width=((r.right-r.left)/w*100)+'%';box.style.height=((r.bottom-r.top)/h*100)+'%';phone.querySelectorAll('.box').forEach(e=>e.remove());phone.append(box);let code=candidate(n);$('details').innerHTML='<h3>'+escapeHtml(label(n))+'</h3>'+Object.entries(n).filter(([k])=>!k.startsWith('_')&&k!=='childs'&&k!=='rect').map(([k,v])=>'<div class="prop"><b>'+escapeHtml(k)+'</b><span>'+escapeHtml(typeof v==='object'?JSON.stringify(v):v)+'</span></div>').join('')+'<h4>Python selector</h4><pre>'+escapeHtml(code)+'</pre><button onclick="copyCode()">Copy selector</button> <button onclick="verifySelector()">Verify selector</button><p id="verification" class="muted">Not yet verified on the live device.</p>';renderTree()}
+function selectorPayload(n){if(n.name)return {sel:[{key:'name',params:n.name}],find:99999};if(n.label)return {sel:[{key:'label',params:n.label}],find:99999};if(n.value)return {sel:[{key:'value',params:n.value}],find:99999};return {sel:[{key:'type',params:n.type}],find:99999}}
 function candidate(n){let base="device.selector()";if(n.name)return base+`.name(${JSON.stringify(n.name)})`;if(n.label)return base+`.label(${JSON.stringify(n.label)})`;if(n.value)return base+`.value(${JSON.stringify(n.value)})`;return base+`.type(${JSON.stringify(n.type)})`}
 function copyCode(){navigator.clipboard.writeText(candidate(nodes[selected]));}
+async function verifySelector(){let target=$('verification'),n=nodes[selected];target.textContent='Verifying...';try{let u='/api/selector?mode='+encodeURIComponent($('mode').value)+'&selector='+encodeURIComponent(JSON.stringify(selectorPayload(n)));let response=await fetch(u);if(!response.ok)throw new Error(await response.text());let result=await response.json();target.textContent=result.count===1?'Verified: exactly one live match.':`Warning: ${result.count} live matches. Refine this selector before using it.`}catch(e){target.textContent='Verification error: '+e.message}}
 async function refresh(){try{$('message').textContent='Loading...';let r=await fetch('/api/snapshot?mode='+encodeURIComponent($('mode').value));if(!r.ok)throw new Error(await r.text());snapshot=await r.json();nodes=[];flatten(snapshot.tree.views);$('screen').src='data:image/png;base64,'+snapshot.image;$('message').textContent=nodes.length+' nodes';renderTree()}catch(e){$('message').textContent='Error: '+e.message}}
 $('screen').addEventListener('click',e=>{let cfg=snapshot.tree.config||{},w=(cfg.display||{}).widthPixels||1,h=(cfg.display||{}).heightPixels||1,im=e.target,x=e.offsetX/im.clientWidth*w,y=e.offsetY/im.clientHeight*h,best=null;for(const n of nodes){let r=rect(n);if(x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)best=n}if(best)pick(best._key)});
 setInterval(()=>{if($('live').checked)refresh()},1500);refresh();
@@ -42,16 +45,23 @@ def serve(client: "AScriptClient", *, host: str = "127.0.0.1", port: int = 0, op
         def _send(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
         def do_GET(self) -> None:
-            path, _, query = self.path.partition("?")
+            parsed = urlparse(self.path); path, query = parsed.path, parse_qs(parsed.query)
             if path == "/": self._send(200, _PAGE.encode(), "text/html; charset=utf-8"); return
             if path == "/api/snapshot":
                 try:
-                    mode = "smart"
-                    for part in query.split("&"):
-                        if part.startswith("mode="): mode = part.split("=", 1)[1]
+                    mode = query.get("mode", ["smart"])[0]
                     tree = client.ui_tree(mode=mode)
                     data = json.dumps({"tree": tree, "image": base64.b64encode(client.screenshot()).decode("ascii")}, ensure_ascii=False).encode()
                     self._send(200, data, "application/json; charset=utf-8")
+                except Exception as exc: self._send(502, str(exc).encode(), "text/plain; charset=utf-8")
+                return
+            if path == "/api/selector":
+                try:
+                    mode = query.get("mode", ["smart"])[0]
+                    selector = json.loads(query.get("selector", [""])[0])
+                    if not isinstance(selector, dict): raise ValueError("selector must be a JSON object")
+                    elements = client.find_elements(selector, mode=mode)
+                    self._send(200, json.dumps({"count": len(elements), "elements": elements}, ensure_ascii=False).encode(), "application/json; charset=utf-8")
                 except Exception as exc: self._send(502, str(exc).encode(), "text/plain; charset=utf-8")
                 return
             self._send(404, b"Not found", "text/plain")

@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.2.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.3.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -129,6 +129,15 @@ png = client.screenshot()
 artifact = client.save_screenshot("artifacts/current.png")
 ```
 
+### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
+
+保存诊断截图、XML 和状态 JSON。每一项独立采集；个别操作失败时，错误会写入 JSON 的 `errors` 字段，其他证据仍会保留。
+
+```python
+artifacts = client.capture_artifacts("artifacts/run-42", prefix="login-failed")
+print(artifacts)  # screenshot/xml/context 中实际成功写入的路径
+```
+
 ## 4. 控件树 API
 
 ### `ui_xml(*, mode="smart", depth=0, x=0, y=0) -> str`
@@ -248,6 +257,11 @@ cancel = base.name("cancel_button")
 | `.index(value)` | 按节点 index 匹配；不建议作为唯一生产定位条件 |
 | `.at(x, y)` | 使用 point 模式从坐标处探测元素 |
 | `.full()` | 使用 full 模式重新构建 selector |
+| `.title(value, contains=False)` | 按 title 匹配 |
+| `.focused(value=True)` | 按焦点状态匹配 |
+| `.traits(value)` | 按可访问性 traits 位匹配 |
+| `.child_count(value)` | 按直接子节点数匹配 |
+| `.with_limits(max_depth=0, max_children=30)` | 设置服务端树查询上限；`0` 交由服务端按不限处理 |
 | `.payload(find=99999)` | 返回设备端 selector JSON；仅调试/互操作使用 |
 | `.code()` | 返回可读的 Python 选择器代码字符串 |
 
@@ -264,7 +278,9 @@ cancel = base.name("cancel_button")
 | `.info` | 首个元素 `info`；无匹配时抛 `LookupError` |
 | `.all()` | `list[UiObject]` |
 | `.get(timeout=0)` | 首个元素或 `None` |
+| `.wait_gone(timeout=10)` | 元素消失前轮询；成功返回 `True`，超时返回 `False` |
 | `.click()` | 点击首个元素中心；无匹配时抛 `LookupError` |
+| `.click_exists(timeout=0)` | 找到即点击并返回 `True`；未找到返回 `False` |
 | `.set_text(text, interval_ms=120)` | 点击首个元素后输入文本 |
 
 ```python
@@ -416,7 +432,7 @@ for entry in logs:
 
 ## 9. 日志 API
 
-### `logs(*, duration=None, stop_event=None) -> Iterator[LogEntry]`
+### `logs(*, duration=None, stop_event=None, reconnects=0, reconnect_delay=1.0) -> Iterator[LogEntry]`
 
 连接设备 `10102` WebSocket 日志端点。`duration=None` 时会持续迭代，直到服务端关闭或 `stop_event` 被设置。
 
@@ -434,6 +450,16 @@ for entry in client.logs(duration=10):
 | `timestamp` | 服务端时间字符串 |
 
 不要在 Web 线程或请求处理线程中无期限迭代日志；应设置 `duration` 或传入可取消的 `threading.Event`。
+
+`reconnects` 表示日志服务意外关闭或网络连接失败后的最大重连次数；`duration` 是包含重连等待在内的总时限。
+
+### `save_logs(destination, *, duration=None, reconnects=0) -> int`
+
+将日志写成 UTF-8 JSON Lines，返回写入事件数。
+
+### `wait_for_log(pattern, *, timeout=10, regex=False, reconnects=1) -> LogEntry | None`
+
+等待首条包含 `pattern` 的日志；`regex=True` 时将 pattern 视为正则表达式。适合部署后等待明确的 `READY` 标记，不应替代业务页面断言。
 
 ## 10. 原始 HTTP API
 
@@ -464,10 +490,10 @@ py -m asclient --device 192.168.3.17:9096 api GET /api/node/dump --params "{\"mo
 
 ## 11. CLI 参考
 
-所有命令共用：
+默认从当前目录的 `asclient.json` 读取连接配置。可复制根目录的 `asclient.example.json` 后填写设备信息；命令行参数只用于单次覆盖。所有命令共用：
 
 ```bat
-py -m asclient --device HOST:PORT [--password PASSWORD] [--timeout SECONDS] <command>
+py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--timeout SECONDS] <command>
 ```
 
 | 命令 | 用法 | 作用 |
@@ -497,7 +523,7 @@ py -m asclient --device HOST:PORT [--password PASSWORD] [--timeout SECONDS] <com
 | `pull` | `pull PROJECT [OUTPUT]` | 下载项目文件 |
 | `run` / `stop` | `run PROJECT` / `stop` | 启动/停止项目 |
 | `deploy` | `deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]` | 上传、运行、取日志和截图 |
-| `log` | `log [SECONDS]` | 输出实时日志 |
+| `log` | `log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]` | 输出、筛选或 JSONL 落盘实时日志 |
 | `cat` | `cat REMOTE_PATH [OUTPUT]` | 打印或保存远程文件 |
 | `eval` | `eval CODE` | 执行受信任设备端 Python |
 | `api` | `api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
@@ -526,3 +552,5 @@ run_forever(client, host="127.0.0.1", port=0)
 | `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
 
 Inspector 只应绑定 `127.0.0.1`。它提供当前页面截图和节点信息，不需要、也不应作为局域网服务使用。
+
+页面中的 **Verify selector** 按钮会以只读方式查询当前候选选择器的实际匹配数。只有结果为 `1` 时，才应将其作为代码候选；该按钮不会点击或修改设备状态。

@@ -3,18 +3,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from .client import AScriptClient
+from .config import device_options, load_config
 from .errors import AScriptError
 
 
 def _client(args: argparse.Namespace) -> AScriptClient:
-    return AScriptClient(args.device, password=args.password, timeout=args.timeout)
+    options = device_options(load_config(args.config))
+    address = args.device or options.get("address", "192.168.3.17:9096")
+    password = args.password if args.password is not None else options.get("password", "")
+    timeout = args.timeout if args.timeout is not None else options.get("timeout", 15.0)
+    retries = options.get("retries", 1)
+    return AScriptClient(address, password=password, timeout=timeout, retries=retries)
 
 
 def _out(value: Any) -> None:
@@ -26,9 +31,10 @@ def _out(value: Any) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AScript local iOS device client")
-    parser.add_argument("--device", default=os.environ.get("ASC_DEVICE", "192.168.3.17:9096"), help="HOST[:PORT], default: ASC_DEVICE")
-    parser.add_argument("--password", default=os.environ.get("ASC_PASSWORD", ""), help="device-service password")
-    parser.add_argument("--timeout", type=float, default=float(os.environ.get("ASC_TIMEOUT", "15")))
+    parser.add_argument("--config", help="JSON config path; defaults to ./asclient.json when present")
+    parser.add_argument("--device", help="HOST[:PORT]; overrides device.address in config")
+    parser.add_argument("--password", help="overrides device.password in config")
+    parser.add_argument("--timeout", type=float, help="seconds; overrides device.timeout in config")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("ping", "status", "scan", "ls", "stop", "home", "app", "pkgs"):
         commands.add_parser(name)
@@ -48,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     push = commands.add_parser("push"); push.add_argument("project"); push.add_argument("source"); push.add_argument("remote", nargs="?")
     pull = commands.add_parser("pull"); pull.add_argument("project"); pull.add_argument("output", nargs="?", default=".")
     deploy = commands.add_parser("deploy"); deploy.add_argument("project"); deploy.add_argument("entry"); deploy.add_argument("--logs", type=float, default=5.0); deploy.add_argument("--screenshot")
-    log = commands.add_parser("log"); log.add_argument("seconds", nargs="?", type=float, default=3.0)
+    log = commands.add_parser("log"); log.add_argument("seconds", nargs="?", type=float, default=3.0); log.add_argument("--reconnects", type=int, default=0); log.add_argument("--output"); log.add_argument("--contains")
     for name in ("tap", "swipe"):
         item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float); item.add_argument("--duration", type=int, default=20 if name == "tap" else 200)
     inp = commands.add_parser("input"); inp.add_argument("text"); inp.add_argument("--interval", type=int, default=120)
@@ -95,7 +101,14 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "pull":
             for target in client.download_project(args.project, args.output): print(target)
         elif cmd == "log":
-            for entry in client.logs(duration=args.seconds): print(f"[{entry.kind}] {entry.timestamp} {entry.message}")
+            output = Path(args.output).open("w", encoding="utf-8") if args.output else None
+            try:
+                for entry in client.logs(duration=args.seconds, reconnects=args.reconnects):
+                    if args.contains and args.contains not in entry.message: continue
+                    print(f"[{entry.kind}] {entry.timestamp} {entry.message}")
+                    if output: output.write(json.dumps({"message": entry.message, "kind": entry.kind, "timestamp": entry.timestamp}, ensure_ascii=False) + "\n")
+            finally:
+                if output: output.close()
         elif cmd == "deploy":
             logs, image = client.deploy(args.project, args.entry, log_seconds=args.logs)
             for entry in logs: print(f"[{entry.kind}] {entry.timestamp} {entry.message}")

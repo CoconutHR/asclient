@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import json
+import re
 import secrets
 import socket
 import struct
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Optional
 
-from .errors import DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
+from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,27 @@ class AScriptClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self.screenshot())
         return destination.resolve()
+
+    def capture_artifacts(self, destination: str | Path, *, prefix: str = "failure", mode: str = "smart") -> dict[str, Path]:
+        """Save as much diagnostic evidence as a partially healthy device permits."""
+        directory = Path(destination); directory.mkdir(parents=True, exist_ok=True)
+        result: dict[str, Path] = {}
+        errors: dict[str, str] = {}
+        try: result["screenshot"] = self.save_screenshot(directory / f"{prefix}.png")
+        except (AScriptError, OSError) as exc: errors["screenshot"] = str(exc)
+        xml = directory / f"{prefix}.xml"
+        try:
+            xml.write_text(self.ui_xml(mode=mode), encoding="utf-8")
+            result["xml"] = xml.resolve()
+        except (AScriptError, OSError) as exc: errors["xml"] = str(exc)
+        context = directory / f"{prefix}.json"
+        payload: dict[str, Any] = {"errors": errors}
+        for key, action in (("status", self.status), ("current_app", self.current_app)):
+            try: payload[key] = action()
+            except AScriptError as exc: errors[key] = str(exc)
+        context.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        result["context"] = context.resolve()
+        return result
 
     def ui_xml(self, *, mode: str = "smart", depth: int = 0, x: float = 0, y: float = 0) -> str:
         return self.request("GET", "/api/node/dump", params={"mode": mode, "depth": depth, "x": x, "y": y}, timeout=30).decode("utf-8")
@@ -371,9 +393,33 @@ class AScriptClient:
         thread.start(); time.sleep(0.2); self.run_project(project); thread.join(log_seconds + 3); stop.set()
         return logs, self.screenshot()
 
-    def logs(self, *, duration: Optional[float] = None, stop_event: Optional[threading.Event] = None) -> Iterator[LogEntry]:
+    def logs(self, *, duration: Optional[float] = None, stop_event: Optional[threading.Event] = None, reconnects: int = 0, reconnect_delay: float = 1.0) -> Iterator[LogEntry]:
+        """Yield device stdout/stderr events from port 10102.
+
+        ``reconnects`` is the number of unexpected disconnects to retry. The
+        duration is a total deadline across every connection attempt.
+        """
         deadline = time.monotonic() + duration if duration is not None else None
-        sock = socket.create_connection((self.address.host, 10102), timeout=self.timeout)
+        remaining = max(0, int(reconnects))
+        while not stop_event or not stop_event.is_set():
+            try:
+                complete = yield from self._logs_once(deadline=deadline, stop_event=stop_event)
+                if complete: return
+                if remaining <= 0: return
+                remaining -= 1
+                if deadline is not None and time.monotonic() >= deadline: return
+                time.sleep(max(0.0, reconnect_delay))
+            except (DeviceConnectionError, ProtocolError, OSError):
+                if remaining <= 0: raise
+                remaining -= 1
+                if deadline is not None and time.monotonic() >= deadline: return True
+                time.sleep(max(0.0, reconnect_delay))
+
+    def _logs_once(self, *, deadline: Optional[float], stop_event: Optional[threading.Event]) -> Iterator[LogEntry]:
+        try:
+            sock = socket.create_connection((self.address.host, 10102), timeout=self.timeout)
+        except OSError as exc:
+            raise DeviceConnectionError(f"cannot reach AScript log service at {self.address.host}:10102: {exc}") from exc
         try:
             key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
             headers = ["GET /log/ HTTP/1.1", f"Host: {self.address.host}:10102", "Upgrade: websocket", "Connection: Upgrade", f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
@@ -386,14 +432,32 @@ class AScriptClient:
                 if deadline is not None and time.monotonic() >= deadline: return
                 try: opcode, payload = self._read_frame(sock)
                 except socket.timeout: continue
-                if opcode == 0x8: return
+                if opcode == 0x8: return False
                 if opcode == 0x9: self._send_frame(sock, 0xA, payload)
                 elif opcode == 0x1:
                     try:
                         event = json.loads(payload.decode("utf-8")); yield LogEntry(str(event.get("msg", "")), str(event.get("type", "o")), str(event.get("time", "")))
                     except (UnicodeDecodeError, json.JSONDecodeError): yield LogEntry(payload.decode("utf-8", "replace"))
+            return True
         finally:
             sock.close()
+
+    def save_logs(self, destination: str | Path, *, duration: Optional[float] = None, reconnects: int = 0) -> int:
+        """Write log events as UTF-8 JSON Lines and return the event count."""
+        destination = Path(destination); destination.parent.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with destination.open("w", encoding="utf-8") as stream:
+            for entry in self.logs(duration=duration, reconnects=reconnects):
+                stream.write(json.dumps({"message": entry.message, "kind": entry.kind, "timestamp": entry.timestamp}, ensure_ascii=False) + "\n")
+                count += 1
+        return count
+
+    def wait_for_log(self, pattern: str, *, timeout: float = 10.0, regex: bool = False, reconnects: int = 1) -> LogEntry | None:
+        """Wait for a log line containing ``pattern`` (or matching its regex)."""
+        matcher = re.compile(pattern).search if regex else lambda value: pattern in value
+        for entry in self.logs(duration=timeout, reconnects=reconnects):
+            if matcher(entry.message): return entry
+        return None
 
     @staticmethod
     def _read_until(sock: socket.socket, marker: bytes) -> bytes:

@@ -1,0 +1,19 @@
+{
+  "enabled": false,
+  "device": {
+    "address": "192.168.3.17:9096",
+    "password": "",
+    "timeout": 20,
+    "retries": 1
+  },
+  "artifacts_dir": "artifacts/integration",
+  "expected_selector": {
+    "sel": [
+      {
+        "key": "name",
+        "params": "replace_with_a_unique_target_app_identifier"
+      }
+    ],
+    "find": 99999
+  }
+}

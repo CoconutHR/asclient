@@ -7,3 +7,6 @@ dist/
 .coverage
 *.png
 *.xml
+asclient.json
+tests/integration.json
+artifacts/
