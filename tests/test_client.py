@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import urlopen
 
-from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, IProxyTunnel, Run, connect
+from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
 from asclient.cli import main
 from asclient.config import device_options, load_config, tunnel_options
 
