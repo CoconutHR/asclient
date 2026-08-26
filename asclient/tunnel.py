@@ -3,9 +3,24 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from .errors import IProxyNotFoundError, TunnelError
+
+
+def _iproxy_not_found_message(executable: str) -> str:
+    """Return an actionable platform-specific missing-iproxy error."""
+    configured = f"iproxy executable not found: {executable!r}."
+    if sys.platform == "win32":
+        return (
+            f"{configured} On Windows, install a trusted libimobiledevice build that includes iproxy.exe, "
+            "then either add its directory to PATH and verify with 'where iproxy', or set "
+            '"tunnel.iproxy": "C:\\\\tools\\\\libimobiledevice\\\\iproxy.exe" in asclient.json.'
+        )
+    if sys.platform == "darwin":
+        return f"{configured} On macOS, install libimobiledevice (for example: 'brew install libimobiledevice') and verify with 'which iproxy', or set tunnel.iproxy to its absolute path."
+    return f"{configured} Install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."
 
 
 @dataclass
@@ -50,7 +65,7 @@ class IProxyTunnel:
         try:
             self._process = subprocess.Popen(self.command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         except FileNotFoundError as exc:
-            raise IProxyNotFoundError(f"iproxy executable not found: {self.executable!r}; install libimobiledevice and configure tunnel.iproxy") from exc
+            raise IProxyNotFoundError(_iproxy_not_found_message(self.executable)) from exc
         except OSError as exc:
             raise TunnelError(f"cannot start iproxy {self.command!r}: {exc}") from exc
         deadline = time.monotonic() + self.startup_timeout

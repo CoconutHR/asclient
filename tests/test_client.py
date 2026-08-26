@@ -7,6 +7,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import urlopen
@@ -14,6 +15,7 @@ from urllib.request import urlopen
 from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
 from asclient.cli import main
 from asclient.config import device_options, load_config, tunnel_options
+from asclient.tunnel import _iproxy_not_found_message
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -141,6 +143,13 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(tunnel.service.command, ["custom-iproxy", "-u", "abc", "19096", "9096"])
         self.assertEqual(tunnel.logs.command if tunnel.logs else None, ["custom-iproxy", "-u", "abc", "11002", "10102"])
         self.assertIsNone(AScriptTunnel(forward_logs=False).log_address)
+
+    def test_missing_iproxy_message_is_actionable_on_windows(self):
+        with patch("asclient.tunnel.sys.platform", "win32"):
+            message = _iproxy_not_found_message("iproxy")
+        self.assertIn("where iproxy", message)
+        self.assertIn("iproxy.exe", message)
+        self.assertIn("tunnel.iproxy", message)
 
     def test_cli_requires_yes_for_state_changes(self):
         stderr = StringIO()

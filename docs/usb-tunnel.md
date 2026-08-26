@@ -23,6 +23,25 @@ ASClient -> 127.0.0.1:10102 -> iproxy -> USB -> iPhone:10102
 
 ASClient 不下载、安装或更新 `iproxy`。这避免客户端静默执行来源不明的原生二进制，也允许团队在受控环境中统一管理 libimobiledevice 版本。
 
+### Windows 安装与定位
+
+安装包含 `iproxy.exe` 的受信任 Windows libimobiledevice 发行版后，在命令提示符执行：
+
+```bat
+where iproxy
+iproxy --help
+```
+
+第一条命令能找到程序时，配置可保持 `"iproxy": "iproxy"`。若没有加入 `PATH`，填写可执行文件的绝对路径；JSON 中反斜杠必须写两次：
+
+```json
+{
+  "tunnel": {
+    "iproxy": "C:\\tools\\libimobiledevice\\iproxy.exe"
+  }
+}
+```
+
 ## 配置
 
 复制并编辑配置：
@@ -125,7 +144,7 @@ with AScriptTunnel():
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `iproxy executable not found` | 未安装或不在 PATH | 安装受信任的 `iproxy`，或设置 `tunnel.iproxy` 为绝对路径 |
+| `iproxy executable not found` | 未安装、未加入 PATH 或路径写错 | Windows 执行 `where iproxy`；无结果则安装包含 `iproxy.exe` 的受信任发行版，或将 `tunnel.iproxy` 设为绝对路径 |
 | `iproxy exited during startup` | USB 未连接、设备未信任、端口冲突或 UDID 错误 | 重新插拔/解锁并信任设备；检查端口和 UDID |
 | 隧道运行但 `status` 失败 | AScript 服务未开启或远端端口不对 | 在手机确认服务；检查 `remote_port` 默认应为 `9096` |
 | `log` 失败 | 日志隧道被关闭、端口冲突或设备端日志服务不可用 | 移除 `--no-logs`，确认 `forward_logs` 为 `true`，检查本机 `10102` 与远端 `10102` |
