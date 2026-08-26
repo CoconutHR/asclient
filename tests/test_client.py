@@ -1,9 +1,10 @@
 import base64
 import json
+import socket
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,8 @@ from urllib.request import urlopen
 from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
 from asclient.cli import main
 from asclient.config import device_options, load_config, tunnel_options
+from asclient.doctor import DoctorCheck, _port_available, save_report, set_iproxy_path
+from asclient.i18n import set_language
 from asclient.tunnel import _iproxy_not_found_message
 
 
@@ -94,6 +97,9 @@ class ClientTests(unittest.TestCase):
         self.client.json = fake_json
         status = self.client.status()
         self.assertTrue(status["available"])
+        self.assertEqual(status["health"], "degraded")
+        self.assertEqual(status["compatibility"]["status_api"]["issue"], "ios_objc_property_callable")
+        self.assertEqual(status["compatibility"]["capabilities"]["screen"], "available")
         self.assertEqual(status["screen"]["width"], 100)
 
     def test_packages_uses_eval_when_status_has_no_package_list(self):
@@ -145,13 +151,49 @@ class ClientTests(unittest.TestCase):
         self.assertIsNone(AScriptTunnel(forward_logs=False).log_address)
 
     def test_missing_iproxy_message_is_actionable_on_windows(self):
-        with patch("asclient.tunnel.sys.platform", "win32"):
-            message = _iproxy_not_found_message("iproxy")
+        set_language("zh-CN")
+        try:
+            with patch("asclient.tunnel.sys.platform", "win32"):
+                message = _iproxy_not_found_message("iproxy")
+        finally:
+            set_language("en")
         self.assertIn("未找到 iproxy", message)
         self.assertIn("where iproxy", message)
         self.assertIn("iproxy.exe", message)
         self.assertIn("tunnel.iproxy", message)
-        self.assertLess(message.index("未找到 iproxy"), message.index("iproxy executable not found"))
+
+    def test_chinese_help_does_not_require_a_device(self):
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            status = main(["--lang", "zh-CN", "help"])
+        self.assertEqual(status, 0)
+        self.assertIn("ASClient 使用帮助", stdout.getvalue())
+        self.assertIn("doctor", stdout.getvalue())
+
+    def test_doctor_can_write_only_a_validated_iproxy_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "iproxy.exe"
+            executable.write_bytes(b"test")
+            config = root / "asclient.json"
+            config.write_text('{"device": {"address": "127.0.0.1:9096"}}', encoding="utf-8")
+            target = set_iproxy_path(load_config(config), str(executable), path=config)
+            saved = load_config(target)
+            self.assertEqual(saved["tunnel"]["iproxy"], str(executable.resolve()))
+            with self.assertRaises(ValueError):
+                set_iproxy_path(saved, str(root / "missing.exe"), path=config)
+
+    def test_doctor_report_omits_password(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = save_report([DoctorCheck("device", "ok", "reachable")], Path(directory) / "doctor.json", client=AScriptClient("127.0.0.1:9096", password="secret"))
+            value = report.read_text(encoding="utf-8")
+            self.assertIn('"device"', value)
+            self.assertNotIn("secret", value)
+
+    def test_doctor_detects_an_occupied_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            self.assertFalse(_port_available("127.0.0.1", occupied.getsockname()[1]))
 
     def test_cli_requires_yes_for_state_changes(self):
         stderr = StringIO()
@@ -187,10 +229,12 @@ class ClientTests(unittest.TestCase):
             with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=2) as response:
                 page = response.read().decode("utf-8")
             self.assertIn('id="appmeta"', page)
+            self.assertIn('id="coordinate"', page)
             self.assertIn('id="divider-left"', page)
             with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
                 snapshot = json.loads(response.read())
             self.assertEqual(snapshot["tree"]["views"][0]["name"], "confirm")
+            self.assertEqual(snapshot["coordinate_space"], {"width": 100, "height": 200})
             self.assertEqual(snapshot["app"]["bundle_id"], "com.example.app")
             self.assertEqual(base64.b64decode(snapshot["image"]), b"PNG")
             selector = quote(json.dumps({"sel": [{"key": "name", "params": "confirm"}], "find": 99999}))

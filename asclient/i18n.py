@@ -1,0 +1,116 @@
+"""Small dependency-free localization support for user-facing output."""
+from __future__ import annotations
+
+import locale
+from contextvars import ContextVar
+from typing import Literal
+
+
+Language = Literal["zh", "en"]
+_language: ContextVar[Language | None] = ContextVar("asclient_language", default=None)
+
+
+def detect_language(value: str | None = None) -> Language:
+    """Resolve an explicit setting or the operating system's display locale."""
+    if value:
+        normalized = value.lower().replace("_", "-")
+        if normalized in {"zh", "zh-cn", "zh-hans", "auto"}:
+            if normalized != "auto":
+                return "zh"
+        elif normalized in {"en", "en-us", "en-gb"}:
+            return "en"
+        elif normalized != "auto":
+            raise ValueError(t("language_invalid"))
+    try:
+        system_locale = locale.getlocale()[0] or ""
+    except ValueError:
+        system_locale = ""
+    normalized_locale = system_locale.lower()
+    return "zh" if normalized_locale.startswith("zh") or "chinese" in normalized_locale or "中文" in normalized_locale else "en"
+
+
+def set_language(value: str | None = None) -> Language:
+    """Set the language for the current command invocation or library context."""
+    selected = detect_language(value)
+    _language.set(selected)
+    return selected
+
+
+def current_language() -> Language:
+    return _language.get() or detect_language()
+
+
+_MESSAGES: dict[str, tuple[str, str]] = {
+    "error_prefix": ("错误", "error"),
+    "confirmed": ("[已确认] 设备={device} 操作={action}", "[confirmed] device={device} action={action}"),
+    "confirmation_required": ("拒绝在设备 {device} 上执行{action}；请加上 --yes 明确确认后重试", "refusing {action} on device {device}; rerun with --yes before the command to confirm"),
+    "action_eval": ("执行设备端 Python", "execute device Python"),
+    "action_create": ("创建项目 {project!r}", "create project {project!r}"),
+    "action_run": ("运行项目 {project!r}", "run project {project!r}"),
+    "action_stop": ("停止当前项目", "stop current project"),
+    "action_remove": ("删除项目 {project!r}", "remove project {project!r}"),
+    "action_rename": ("将项目 {project!r} 重命名为 {new_name!r}", "rename project {project!r} to {new_name!r}"),
+    "action_upload": ("上传文件到项目 {project!r}", "upload into project {project!r}"),
+    "action_deploy": ("部署并运行项目 {project!r}", "deploy and run project {project!r}"),
+    "action_tap": ("点击坐标 {coordinates}", "tap at {coordinates}"),
+    "action_swipe": ("滑动坐标 {coordinates}", "swipe {coordinates}"),
+    "action_input": ("向当前控件输入文本", "input text into focused control"),
+    "action_home": ("执行 Home 操作", "press Home"),
+    "action_api": ("调用原始 API {method} {path}", "raw API {method} {path}"),
+    "tap_requires": ("tap 需要两个参数：X Y", "tap requires X Y"),
+    "swipe_requires": ("swipe 需要四个参数：X1 Y1 X2 Y2", "swipe requires X1 Y1 X2 Y2"),
+    "uploaded_count": ("已上传 {count} 个文件", "uploaded {count} file(s)"),
+    "inspector_running": ("Inspector 已启动：{url}。按 Ctrl+C 停止。", "Inspector is running at {url}. Press Ctrl+C to stop."),
+    "tunnel_running": ("USB 隧道已启动：{routes}。请将 device.address 设置为 {address}。按 Ctrl+C 停止。", "USB tunnel is running: {routes}. Set device.address to {address}. Press Ctrl+C to stop."),
+    "help_overview": ("ASClient 使用帮助", "ASClient usage"),
+    "help_usage": ("用法", "Usage"),
+    "help_config": ("配置文件", "Configuration"),
+    "help_commands": ("常用命令", "Common commands"),
+    "help_more": ("查看某个命令的详细参数：py -m asclient help <命令>", "View a command's arguments: py -m asclient help <command>"),
+    "help_unknown": ("未知命令：{command}。可运行 py -m asclient help 查看可用命令。", "Unknown command: {command}. Run py -m asclient help to list commands."),
+    "language_invalid": ("language 只能是 'auto'、'zh-CN' 或 'en'", "language must be 'auto', 'zh-CN', or 'en'"),
+    "device_address_empty": ("设备地址不能为空", "device address is empty"),
+    "device_address_invalid": ("设备地址必须是 HOST[:PORT]", "device address must be HOST[:PORT]"),
+    "path_must_start": ("API 路径必须以 '/' 开头", "path must start with '/'") ,
+    "form_data_exclusive": ("form 与 data 不能同时使用", "form and data are mutually exclusive"),
+    "cannot_reach_device": ("无法连接 AScript 设备 {address}: {detail}", "cannot reach AScript device at {address}: {detail}"),
+    "invalid_json": ("接口 {path} 返回了无效 JSON", "invalid JSON response from {path}"),
+    "expected_object": ("接口 {path} 应返回 JSON 对象", "expected object response from {path}"),
+    "status_fallback_summary": ("/api/status 存在设备端兼容性问题，客户端已降级探测可用能力", "the device /api/status endpoint has a compatibility issue; the client used capability fallback"),
+    "cannot_reach_logs": ("无法连接 AScript 日志服务 {host}:10102: {detail}", "cannot reach AScript log service at {host}:10102: {detail}"),
+    "websocket_rejected": ("AScript 日志服务拒绝 WebSocket 连接", "AScript log endpoint rejected WebSocket upgrade"),
+    "doctor_title": ("ASClient 环境诊断", "ASClient environment diagnosis"),
+    "doctor_ok": ("正常", "ok"),
+    "doctor_warning": ("警告", "warning"),
+    "doctor_error": ("错误", "error"),
+    "doctor_iproxy_found": ("已找到 iproxy：{path}", "iproxy found: {path}"),
+    "doctor_iproxy_missing": ("未找到 iproxy。无法自动安装第三方二进制；请安装受信任的 libimobiledevice，或用 doctor --fix-iproxy <路径> 写入已有 iproxy 的绝对路径。", "iproxy was not found. Third-party binaries are never installed automatically; install a trusted libimobiledevice build or use doctor --fix-iproxy <path> to save an existing iproxy path."),
+    "doctor_port_available": ("本机端口 {host}:{port} 可用于建立隧道", "local port {host}:{port} is available for a tunnel"),
+    "doctor_port_busy": ("本机端口 {host}:{port} 已被占用。不会自动结束其他程序；请关闭占用程序或在配置中使用其他 local_port。", "local port {host}:{port} is already in use. Other processes are never stopped automatically; close the owner or configure a different local_port."),
+    "doctor_device_ok": ("设备服务可访问，平台：{platform}", "device service is reachable, platform: {platform}"),
+    "doctor_device_failed": ("无法访问设备服务：{detail}。请检查 device.address、网络/USB 隧道、AScript 服务开关和密码。", "cannot reach the device service: {detail}. Check device.address, network/USB tunnel, AScript service, and password."),
+    "doctor_log_ok": ("日志端口可连接：{host}:10102", "log port is reachable: {host}:10102"),
+    "doctor_log_failed": ("无法连接日志端口 {host}:10102：{detail}。Wi-Fi 请检查网络；USB 请确认 tunnel 未使用 --no-logs 且 10102 已映射。", "cannot reach log port {host}:10102: {detail}. On Wi-Fi check the network; on USB ensure tunnel was not started with --no-logs and that 10102 is forwarded."),
+    "doctor_status_fallback": ("设备的 /api/status 存在已知兼容性问题，客户端已使用屏幕与前台应用信息降级；设备仍可用。原始错误：{detail}", "the device /api/status endpoint has a known compatibility issue; the client used screen and foreground-app fallback and the device remains usable. Original error: {detail}"),
+    "doctor_status_ok": ("设备状态接口正常", "device status endpoint is healthy"),
+    "doctor_fix_plan": ("准备写入配置 {path}：tunnel.iproxy = {executable}", "ready to write configuration {path}: tunnel.iproxy = {executable}"),
+    "doctor_fix_confirm": ("是否写入这个本地配置修复？[y/N] ", "Write this local configuration fix? [y/N] "),
+    "doctor_fix_declined": ("未写入配置。要执行修复，请在交互终端回答 y，或加入 --yes。", "configuration was not changed. Answer y in an interactive terminal or add --yes to apply the fix."),
+    "doctor_fix_done": ("已写入配置修复：{path}", "configuration fix written: {path}"),
+    "doctor_fix_invalid": ("指定的 iproxy 路径不是文件：{path}。未写入任何配置。", "the supplied iproxy path is not a file: {path}. No configuration was changed."),
+    "doctor_report_saved": ("诊断报告已保存：{path}", "diagnostic report saved: {path}"),
+    "iproxy_missing_windows": ("未找到 iproxy 可执行文件: {executable}。\nWindows：请安装包含 iproxy.exe 的可信 libimobiledevice 发行版；然后将其目录加入 PATH 并执行 'where iproxy' 验证，或在 asclient.json 中设置 \"tunnel.iproxy\": \"C:\\\\tools\\\\libimobiledevice\\\\iproxy.exe\"。", "iproxy executable not found: {executable}.\nWindows: install a trusted libimobiledevice build that includes iproxy.exe; then add its directory to PATH and verify with 'where iproxy', or configure the absolute executable path in asclient.json."),
+    "iproxy_missing_macos": ("未找到 iproxy 可执行文件: {executable}。\nmacOS：安装 libimobiledevice（例如 'brew install libimobiledevice'）后执行 'which iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。", "iproxy executable not found: {executable}.\nmacOS: install libimobiledevice (for example: 'brew install libimobiledevice') and verify with 'which iproxy', or set tunnel.iproxy to its absolute path."),
+    "iproxy_missing_linux": ("未找到 iproxy 可执行文件: {executable}。\nLinux：安装发行版提供的 libimobiledevice 包后执行 'command -v iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。", "iproxy executable not found: {executable}.\nLinux: install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."),
+    "tunnel_exited": ("USB 隧道意外退出：{detail}", "USB tunnel exited unexpectedly: {detail}"),
+    "tunnel_route_exited": ("{route} 映射已退出（{address} -> 设备:{remote_port}）：{detail}", "{route} forwarding exited ({address} -> device:{remote_port}): {detail}"),
+}
+
+
+def t(key: str, /, **values: object) -> str:
+    """Translate a short user-facing message for the active language."""
+    try:
+        template = _MESSAGES[key][0 if current_language() == "zh" else 1]
+    except KeyError as exc:
+        raise KeyError(f"unknown translation key: {key}") from exc
+    return template.format(**values)

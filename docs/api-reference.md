@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.5.4`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.6.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -9,6 +9,7 @@
 | UI 控件查询、点击和输入 | `connect()` / `Device` |
 | 截图、OCR、图色、项目文件、日志 | `AScriptClient` |
 | 交互式检查控件树 | `py -m asclient inspect` |
+| 诊断本机、USB 与设备服务 | `py -m asclient doctor` |
 | 临时调用已确认但未封装的设备端点 | `AScriptClient.request()` 或 CLI `api` |
 | 设备端执行 Python | `eval_python()` 或 CLI `eval`，仅限受信任代码 |
 
@@ -113,14 +114,33 @@ assert client.ping() == "iOS"
 ```python
 {
     "available": True,
+    "health": "degraded",
     "status_api_error": "...",  # 仅降级时存在
+    "compatibility": {
+        "status_api": {"state": "degraded", "issue": "ios_objc_property_callable"},
+        "capabilities": {"screen": "available", "current_app": "available"}
+    },
     "platform": "iOS",
     "screen": {"width": 393, "height": 852},
     "current_app": {"bundle_id": "..."},
 }
 ```
 
-不要把所有 status 字段作为跨版本契约。只需将 `available`、`screen` 和 `current_app` 用作连通性与环境记录。
+`health: "degraded"` 表示客户端发现设备端 `/api/status` 的兼容性问题，但已成功执行降级探测；不是设备不可用。`compatibility.capabilities` 明确列出屏幕和当前应用信息是否成功取得。不要把所有 status 字段作为跨版本契约。
+
+### `doctor` 命令
+
+```bat
+py -m asclient doctor
+py -m asclient doctor --report artifacts\doctor.json
+py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"
+```
+
+诊断会检查 `iproxy`、本地 USB 映射端口、设备 HTTP 服务、`/api/status` 兼容降级和日志端口。默认只读。它从不自动安装第三方二进制、停止其他程序或修改手机。唯一内置修复是验证用户提供的 `iproxy` 文件并写入 `asclient.json` 的 `tunnel.iproxy`；写入前需要交互确认，也可加 `--yes` 供已审查的脚本使用。`--report` 写出不含密码的 JSON 证据文件。
+
+### 语言选择
+
+CLI 默认按操作系统语言输出：中文系统为中文，其他系统为英文。配置文件顶层可设置 `"language": "auto"`、`"zh-CN"` 或 `"en"`；单次命令可用 `--lang zh-CN` 或 `--lang en` 覆盖。运行 `py -m asclient help` 获取中文友好命令速查，`py -m asclient help doctor` 可查看单个命令。
 
 ### `scan_subnet(*, workers=64, probe_timeout=1.0) -> list[tuple[DeviceAddress, str]]`
 

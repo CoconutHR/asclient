@@ -25,6 +25,7 @@ ASClient 是 AScript iOS 本地开发服务的 Python 客户端。它不修改 I
 | 元素树与语义选择器 | 取决于目标 App | 先用 Inspector 验证，再作为生产测试依赖 |
 | Inspector | 本机客户端实现 | 默认仅监听 `127.0.0.1`，不改手机端 |
 | USB 隧道 | 客户端封装，待目标环境验收 | 使用外部 `iproxy` 将本机端口转发到手机服务 |
+| 环境诊断 | 客户端实现 | `doctor` 区分本机工具、端口、控制服务、日志服务与 status 兼容问题 |
 
 ## 3. 安装、更新与版本控制
 
@@ -40,10 +41,10 @@ ASClient 是 AScript iOS 本地开发服务的 Python 客户端。它不修改 I
 git pull --ff-only
 py -m pip install --user --upgrade .
 copy asclient.example.json asclient.json
-py -m asclient status
+py -m asclient doctor
 ```
 
-编辑 `asclient.json` 中的 `device.address`、`device.password`、`device.timeout` 和 `device.retries`。真实配置已被 `.gitignore` 排除，不应提交。单次临时覆盖可使用 `--device`、`--password` 或 `--timeout`。
+编辑 `asclient.json` 中的 `language`、`device.address`、`device.password`、`device.timeout` 和 `device.retries`。`language` 默认为 `auto`，中文系统输出中文，其他系统输出英文；可用 `--lang zh-CN` 或 `--lang en` 临时覆盖。真实配置已被 `.gitignore` 排除，不应提交。单次临时覆盖可使用 `--device`、`--password` 或 `--timeout`。
 
 使用 `py -m asclient`，不要依赖 Windows `Scripts` 目录是否已加入 `PATH`。`asc` 命令仅在该目录已加入 `PATH` 时可用。
 
@@ -70,10 +71,18 @@ py -m asclient dump evidence\baseline.xml
 py -m asclient ocr
 ```
 
+遇到连接、USB 或日志问题时，优先执行：
+
+```bat
+py -m asclient doctor --report evidence\doctor.json
+```
+
+`doctor` 默认不会修改电脑或手机。它不会自动安装 `iproxy`、关闭端口占用进程或更改设备设置；这些问题会给出明确解决方案。只有 `doctor --fix-iproxy <绝对路径>` 会请求确认后写入 `tunnel.iproxy`，用于已存在的受信任可执行文件。
+
 验收标准：
 
 1. `ping` 成功并返回平台信息。
-2. `status` 的 `available` 为 `true`。出现 `status_api_error` 时，它表示已启用 iOS 4001 兼容降级，而不是设备不可用；仍需确认 `screen` 和 `current_app` 存在。
+2. `status` 的 `available` 为 `true`。出现 `health: "degraded"` 与 `status_api_error` 时，它表示已启用 iOS 4001 兼容降级，而不是设备不可用；仍需确认 `compatibility.capabilities` 中的 `screen/current_app` 为 `available`。
 3. 截图文件非空且画面符合预期。
 4. XML/Inspector 能反映目标 App 的树。空 Application 根节点表示该页不可使用语义定位，应转为 OCR/图色方案或调整 App 页面。
 5. OCR 至少能识别一项预期文本或图像流程能定位预期模板。
@@ -190,7 +199,7 @@ py -m asclient inspect
 2. 点击截图或左侧树中的节点，核对矩形、`name`、`label`、`type` 和可见状态。
 3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
-5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
+5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示映射到 AScript 真机坐标系的 `x/y`，可直接用于坐标动作验证；面板缩放不会改变该数值。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 

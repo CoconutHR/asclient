@@ -85,6 +85,14 @@ USB 使用时将 `device.address` 设为本机回环地址：
 py -m asclient tunnel
 ```
 
+启动前或出现故障时，先运行只读诊断：
+
+```bat
+py -m asclient doctor --report artifacts\usb-doctor.json
+```
+
+它会分别报告 `iproxy`、本机 `9096/10102`、设备控制服务和日志端口。端口被占用时不会自动终止其他进程；缺少 `iproxy` 时不会自动下载安装。若已手工安装但未加入 `PATH`，可在审查路径后执行 `py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"`，再确认写入配置。
+
 成功后会显示：
 
 ```text

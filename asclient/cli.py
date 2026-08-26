@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from .client import AScriptClient
-from .config import device_options, load_config, tunnel_options
-from .errors import AScriptError
+from .config import device_options, language_option, load_config, tunnel_options
+from .doctor import diagnose, planned_iproxy_fix, save_report, set_iproxy_path
+from .errors import AScriptError, TunnelError
+from .i18n import current_language, set_language, t
 from .tunnel import AScriptTunnel
 
 
@@ -48,18 +50,103 @@ def _out(value: Any) -> None:
 def _confirm(args: argparse.Namespace, client: AScriptClient, action: str) -> None:
     """Require an explicit acknowledgement for a state-changing CLI operation."""
     if not args.yes:
-        raise ValueError(f"refusing {action} on device {client.address}; rerun with --yes before the command to confirm")
-    print(f"[confirmed] device={client.address} action={action}", file=sys.stderr)
+        raise ValueError(t("confirmation_required", device=client.address, action=action))
+    print(t("confirmed", device=client.address, action=action), file=sys.stderr)
+
+
+_HELP: dict[str, tuple[str, str]] = {
+    "status": ("status\n查看设备可用性、屏幕尺寸和当前前台应用。", "status\nShow availability, screen size, and foreground app."),
+    "doctor": ("doctor [--fix-iproxy PATH] [--yes]\n诊断本地工具、端口、设备服务和日志服务；仅在 --yes 确认后写入安全配置修复。", "doctor [--fix-iproxy PATH] [--yes]\nDiagnose local tools, ports, device service, and logs; write safe fixes only after --yes confirmation."),
+    "tunnel": ("tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs]\n通过 USB 同时转发控制端口 9096 和日志端口 10102。", "tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs]\nForward USB control port 9096 and log port 10102."),
+    "inspect": ("inspect\n启动本机 Inspector，查看截图、控件树、前台包名和坐标。", "inspect\nStart the local Inspector for screenshots, trees, foreground app, and coordinates."),
+    "deploy": ("deploy PROJECT ENTRY [--logs SECONDS]\n上传入口文件、运行项目、收集日志并保存截图。需要 --yes。", "deploy PROJECT ENTRY [--logs SECONDS]\nUpload an entry file, run the project, collect logs, and save a screenshot. Requires --yes."),
+    "log": ("log [SECONDS]\n读取设备日志回显；USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS]\nRead device log output; USB mode requires tunnel to forward 10102."),
+    "tap": ("tap X Y\n在真机坐标点击。需要 --yes。", "tap X Y\nTap a device coordinate. Requires --yes."),
+}
+
+
+def _print_help(topic: str | None = None) -> None:
+    language = current_language()
+    if topic:
+        item = _HELP.get(topic)
+        if item is None:
+            print(t("help_unknown", command=topic), file=sys.stderr)
+            return
+        print(item[0 if language == "zh" else 1])
+        return
+    if language == "zh":
+        print("""ASClient 使用帮助
+
+用法：py -m asclient [--config 文件] [--device 地址] [--lang zh-CN|en] <命令>
+
+配置文件：默认读取当前目录的 asclient.json。可设置顶层 language 为 auto、zh-CN 或 en。
+
+常用命令：
+  doctor     诊断本机、USB 隧道、设备服务和日志服务
+  status     查看设备状态与当前前台应用
+  tunnel     通过 USB 转发 9096 控制端口及 10102 日志端口
+  inspect    打开可视化控件检查器
+  shot       保存真机截图
+  dump       保存 XML 控件树
+  deploy     上传并运行项目，收集日志和截图（需要 --yes）
+  log        查看日志回显
+  tap/swipe/input/home  执行设备操作（需要 --yes）
+
+查看某个命令的详细参数：py -m asclient help <命令>""")
+    else:
+        print("""ASClient usage
+
+Usage: py -m asclient [--config FILE] [--device ADDRESS] [--lang zh-CN|en] <command>
+
+Configuration: reads asclient.json from the current directory by default. The top-level language can be auto, zh-CN, or en.
+
+Common commands:
+  doctor     Diagnose local tools, USB tunnel, device service, and log service
+  status     Show device status and foreground app
+  tunnel     Forward USB control port 9096 and log port 10102
+  inspect    Open the visual control inspector
+  shot       Save a device screenshot
+  dump       Save the XML control tree
+  deploy     Upload/run a project and collect logs/screenshots (requires --yes)
+  log        Read log output
+  tap/swipe/input/home  Perform device actions (requires --yes)
+
+View command details: py -m asclient help <command>""")
+
+
+def _print_doctor(checks: list[Any]) -> None:
+    labels = {"ok": t("doctor_ok"), "warning": t("doctor_warning"), "error": t("doctor_error")}
+    print(t("doctor_title"))
+    for check in checks:
+        print(f"[{labels[check.status]}] {check.message}")
+
+
+def _confirm_repair(args: argparse.Namespace) -> bool:
+    if args.yes:
+        return True
+    if not sys.stdin.isatty():
+        print(t("doctor_fix_declined"), file=sys.stderr)
+        return False
+    try:
+        return input(t("doctor_fix_confirm")).strip().lower() in {"y", "yes"}
+    except (EOFError, OSError):
+        return False
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="AScript local iOS device client")
+    parser = argparse.ArgumentParser(description="AScript 本地 iOS 设备客户端" if current_language() == "zh" else "AScript local iOS device client")
     parser.add_argument("--config", help="JSON config path; defaults to ./asclient.json when present")
     parser.add_argument("--device", help="HOST[:PORT]; overrides device.address in config")
     parser.add_argument("--password", help="overrides device.password in config")
     parser.add_argument("--timeout", type=float, help="seconds; overrides device.timeout in config")
+    parser.add_argument("--lang", choices=("auto", "zh-CN", "en"), help="output language; defaults to the OS language or config language")
     parser.add_argument("--yes", action="store_true", help="confirm a state-changing operation")
     commands = parser.add_subparsers(dest="command", required=True)
+    help_command = commands.add_parser("help", help="show concise usage help")
+    help_command.add_argument("topic", nargs="?")
+    doctor = commands.add_parser("doctor", help="diagnose local tools and device connectivity")
+    doctor.add_argument("--fix-iproxy", metavar="PATH", help="save a validated absolute iproxy path after confirmation")
+    doctor.add_argument("--report", metavar="FILE", help="write a password-free JSON diagnostic report")
     for name in ("ping", "status", "scan", "ls", "stop", "home", "app", "pkgs"):
         commands.add_parser(name)
     shot = commands.add_parser("shot"); shot.add_argument("output", nargs="?", default="screenshot.png")
@@ -94,9 +181,26 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    client = _client(args)
     try:
+        config = load_config(args.config)
+        set_language(args.lang or language_option(config))
+        if args.command == "help":
+            _print_help(args.topic)
+            return 0 if not args.topic or args.topic in _HELP else 1
+        client = _client(args)
         cmd = args.command
+        if cmd == "doctor":
+            checks = diagnose(client, config)
+            _print_doctor(checks)
+            if args.report:
+                print(t("doctor_report_saved", path=save_report(checks, args.report, client=client)))
+            if args.fix_iproxy:
+                if not Path(args.fix_iproxy).expanduser().is_file():
+                    raise ValueError(t("doctor_fix_invalid", path=Path(args.fix_iproxy).expanduser()))
+                print(planned_iproxy_fix(args.config, args.fix_iproxy))
+                if _confirm_repair(args):
+                    print(t("doctor_fix_done", path=set_iproxy_path(config, args.fix_iproxy, path=args.config)))
+            return 1 if any(check.status == "error" for check in checks) else 0
         if cmd == "ping": _out({"platform": client.ping(), "device": str(client.address)})
         elif cmd == "status": _out(client.status())
         elif cmd == "scan": _out([{"device": str(address), "platform": platform} for address, platform in client.scan_subnet()])
@@ -109,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "inspect":
             from .inspector import serve
             server = serve(client, host=args.host, port=args.port, open_browser=not args.no_browser)
-            print(f"Inspector is running at http://{args.host}:{server.server_port}/. Press Ctrl+C to stop.")
+            print(t("inspector_running", url=f"http://{args.host}:{server.server_port}/"))
             try: server.serve_forever()
             except KeyboardInterrupt: pass
             finally: server.server_close()
@@ -118,14 +222,14 @@ def main(argv: list[str] | None = None) -> int:
             routes = f"service={tunnel.address} -> device:{tunnel.remote_port}"
             if tunnel.log_address:
                 routes += f"; logs={tunnel.log_address} -> device:{tunnel.remote_log_port}"
-            print(f"USB tunnel is running: {routes}. Set device.address to {tunnel.address}. Press Ctrl+C to stop.")
+            print(t("tunnel_running", routes=routes, address=tunnel.address))
             try:
                 while tunnel.is_running: time.sleep(0.25)
-                raise OSError("iproxy exited unexpectedly")
+                raise TunnelError(t("tunnel_exited", detail=tunnel.exit_summary()))
             except KeyboardInterrupt: pass
             finally: tunnel.stop()
         elif cmd == "eval":
-            _confirm(args, client, "execute device Python")
+            _confirm(args, client, t("action_eval"))
             _out(client.eval_python(args.code))
         elif cmd == "cat":
             data = client.read_file(args.path)
@@ -135,15 +239,15 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "findcolor": _out(client.find_colors(args.colors, diff=args.diff or 0.98))
         elif cmd == "compare": _out(client.compare_colors(args.colors, diff=args.diff or 0.9))
         elif cmd == "ls": _out(client.projects())
-        elif cmd == "create": _confirm(args, client, f"create project {args.project!r}"); client.create_project(args.project)
-        elif cmd == "run": _confirm(args, client, f"run project {args.project!r}"); client.run_project(args.project)
-        elif cmd == "stop": _confirm(args, client, "stop current project"); client.stop_project()
-        elif cmd == "remove": _confirm(args, client, f"remove project {args.project!r}"); client.remove_project(args.project)
-        elif cmd == "rename": _confirm(args, client, f"rename project {args.project!r} to {args.new_name!r}"); client.rename_project(args.project, args.new_name)
+        elif cmd == "create": _confirm(args, client, t("action_create", project=args.project)); client.create_project(args.project)
+        elif cmd == "run": _confirm(args, client, t("action_run", project=args.project)); client.run_project(args.project)
+        elif cmd == "stop": _confirm(args, client, t("action_stop")); client.stop_project()
+        elif cmd == "remove": _confirm(args, client, t("action_remove", project=args.project)); client.remove_project(args.project)
+        elif cmd == "rename": _confirm(args, client, t("action_rename", project=args.project, new_name=args.new_name)); client.rename_project(args.project, args.new_name)
         elif cmd == "files": _out(client.project_files(args.project))
         elif cmd == "push":
-            _confirm(args, client, f"upload into project {args.project!r}")
-            source = Path(args.source); count = client.upload_tree(args.project, source) if source.is_dir() else (client.upload_file(args.project, source, args.remote) or 1); print(f"uploaded {count} file(s)")
+            _confirm(args, client, t("action_upload", project=args.project))
+            source = Path(args.source); count = client.upload_tree(args.project, source) if source.is_dir() else (client.upload_file(args.project, source, args.remote) or 1); print(t("uploaded_count", count=count))
         elif cmd == "pull":
             for target in client.download_project(args.project, args.output): print(target)
         elif cmd == "log":
@@ -156,28 +260,28 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 if output: output.close()
         elif cmd == "deploy":
-            _confirm(args, client, f"deploy and run project {args.project!r}")
+            _confirm(args, client, t("action_deploy", project=args.project))
             logs, image = client.deploy(args.project, args.entry, log_seconds=args.logs)
             for entry in logs: print(f"[{entry.kind}] {entry.timestamp} {entry.message}")
             path = Path(args.screenshot or f"deploy_{time.strftime('%Y%m%d_%H%M%S')}.png"); path.write_bytes(image); print(path.resolve())
         elif cmd == "tap":
-            if len(args.coordinates) != 2: raise ValueError("tap requires X Y")
-            _confirm(args, client, f"tap at {args.coordinates}")
+            if len(args.coordinates) != 2: raise ValueError(t("tap_requires"))
+            _confirm(args, client, t("action_tap", coordinates=args.coordinates))
             _out(client.tap(*args.coordinates, duration_ms=args.duration))
         elif cmd == "swipe":
-            if len(args.coordinates) != 4: raise ValueError("swipe requires X1 Y1 X2 Y2")
-            _confirm(args, client, f"swipe {args.coordinates}")
+            if len(args.coordinates) != 4: raise ValueError(t("swipe_requires"))
+            _confirm(args, client, t("action_swipe", coordinates=args.coordinates))
             _out(client.swipe(*args.coordinates, duration_ms=args.duration))
-        elif cmd == "input": _confirm(args, client, "input text into focused control"); _out(client.input_text(args.text, interval_ms=args.interval))
-        elif cmd == "home": _confirm(args, client, "press Home"); _out(client.home())
+        elif cmd == "input": _confirm(args, client, t("action_input")); _out(client.input_text(args.text, interval_ms=args.interval))
+        elif cmd == "home": _confirm(args, client, t("action_home")); _out(client.home())
         elif cmd == "app": _out(client.current_app())
         elif cmd == "api":
-            _confirm(args, client, f"raw API {args.method.upper()} {args.path}")
+            _confirm(args, client, t("action_api", method=args.method.upper(), path=args.path))
             params, form = json.loads(args.params), json.loads(args.form)
             raw = client.request(args.method, args.path, params=params or None, form=form or None)
             try: _out(json.loads(raw.decode("utf-8")))
             except (UnicodeDecodeError, json.JSONDecodeError): sys.stdout.buffer.write(raw)
     except (AScriptError, ValueError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"{t('error_prefix')}: {exc}", file=sys.stderr)
         return 1
     return 0

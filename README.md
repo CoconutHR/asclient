@@ -29,6 +29,12 @@ single invocation. For real-device smoke checks, copy
 `tests\integration.example.json` to `tests\integration.json`, set
 `enabled` to `true`, and run `py -m unittest tests.test_integration -v`.
 
+Run `py -m asclient help` for a concise command guide. `py -m asclient doctor`
+checks iproxy, tunnel ports, device connectivity, the log port, and status
+compatibility without modifying the machine or device. CLI output follows the
+system language by default; set top-level `language` in `asclient.json` or use
+`--lang zh-CN` / `--lang en` to override it.
+
 ## Object API
 
 The service stays on the phone; the client supplies an automation API modelled

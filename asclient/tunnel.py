@@ -7,25 +7,16 @@ import sys
 import time
 from dataclasses import dataclass, field
 from .errors import IProxyNotFoundError, TunnelError
+from .i18n import t
 
 
 def _iproxy_not_found_message(executable: str) -> str:
-    """Return an actionable bilingual platform-specific missing-iproxy error."""
-    chinese_error = f"未找到 iproxy 可执行文件: {executable!r}."
-    english_error = f"iproxy executable not found: {executable!r}."
+    """Return an actionable message in the selected language."""
     if sys.platform == "win32":
-        return (
-            f"{chinese_error}\n"
-            "Windows：请安装包含 iproxy.exe 的可信 libimobiledevice 发行版；然后将其目录加入 PATH 并执行 "
-            "'where iproxy' 验证，或在 asclient.json 中设置 "
-            '"tunnel.iproxy": "C:\\\\tools\\\\libimobiledevice\\\\iproxy.exe"。\n'
-            f"{english_error}\n"
-            "Windows: install a trusted libimobiledevice build that includes iproxy.exe; then add its directory "
-            "to PATH and verify with 'where iproxy', or configure the absolute executable path in asclient.json."
-        )
+        return t("iproxy_missing_windows", executable=repr(executable))
     if sys.platform == "darwin":
-        return f"{chinese_error}\nmacOS：安装 libimobiledevice（例如 'brew install libimobiledevice'）后执行 'which iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。\n{english_error}\nmacOS: install libimobiledevice (for example: 'brew install libimobiledevice') and verify with 'which iproxy', or set tunnel.iproxy to its absolute path."
-    return f"{chinese_error}\nLinux：安装发行版提供的 libimobiledevice 包后执行 'command -v iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。\n{english_error}\nLinux: install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."
+        return t("iproxy_missing_macos", executable=repr(executable))
+    return t("iproxy_missing_linux", executable=repr(executable))
 
 
 @dataclass
@@ -65,10 +56,28 @@ class IProxyTunnel:
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
+    def exit_detail(self) -> str:
+        """Return a short diagnostic after an exited child process."""
+        process = self._process
+        if process is None:
+            return "process was not started"
+        if process.poll() is None:
+            return "process is still running"
+        detail = ""
+        if process.stderr:
+            try:
+                detail = process.stderr.read().strip()
+            except OSError:
+                pass
+        return detail[-2000:] or f"exit code {process.returncode}"
+
     def start(self) -> "IProxyTunnel":
         if self.is_running: return self
         try:
-            self._process = subprocess.Popen(self.command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            kwargs: dict[str, object] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.PIPE, "text": True}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            self._process = subprocess.Popen(self.command, **kwargs)
         except FileNotFoundError as exc:
             raise IProxyNotFoundError(_iproxy_not_found_message(self.executable)) from exc
         except OSError as exc:
@@ -151,6 +160,14 @@ class AScriptTunnel:
     @property
     def is_running(self) -> bool:
         return self.service.is_running and (self.logs is None or self.logs.is_running)
+
+    def exit_summary(self) -> str:
+        """Describe every mapping that stopped, including iproxy stderr when available."""
+        stopped: list[str] = []
+        for route, tunnel in (("service", self.service), ("logs", self.logs)):
+            if tunnel is not None and not tunnel.is_running:
+                stopped.append(t("tunnel_route_exited", route=route, address=tunnel.address, remote_port=tunnel.remote_port, detail=tunnel.exit_detail()))
+        return "; ".join(stopped) or "no stopped mapping was identified"
 
     def start(self) -> "AScriptTunnel":
         self.service.start()

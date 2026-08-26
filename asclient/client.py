@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Optional
 
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
+from .i18n import t
 from .runtime import device_lock
 
 
@@ -32,12 +33,12 @@ class DeviceAddress:
             return value
         value = value.strip().removeprefix("http://").removeprefix("https://").rstrip("/")
         if not value:
-            raise ValueError("device address is empty")
+            raise ValueError(t("device_address_empty"))
         host, sep, port = value.rpartition(":")
         if not sep:
             return cls(value)
         if not host or not port.isdecimal() or not 1 <= int(port) <= 65535:
-            raise ValueError("device address must be HOST[:PORT]")
+            raise ValueError(t("device_address_invalid"))
         return cls(host, int(port))
 
     def __str__(self) -> str:
@@ -78,9 +79,9 @@ class AScriptClient:
 
     def request(self, method: str, path: str, *, params: Optional[Mapping[str, Any]] = None, form: Optional[Mapping[str, Any]] = None, data: Optional[bytes] = None, headers: Optional[Mapping[str, str]] = None, timeout: Optional[float] = None) -> bytes:
         if not path.startswith("/"):
-            raise ValueError("path must start with '/'")
+            raise ValueError(t("path_must_start"))
         if form is not None and data is not None:
-            raise ValueError("form and data are mutually exclusive")
+            raise ValueError(t("form_data_exclusive"))
         if params:
             path += ("&" if "?" in path else "?") + urllib.parse.urlencode(params, doseq=True)
         if form is not None:
@@ -98,7 +99,7 @@ class AScriptClient:
                 last_error = exc
                 if attempt < self.retries:
                     time.sleep(0.2 * (2 ** attempt))
-        raise DeviceConnectionError(f"cannot reach AScript device at {self.address}: {last_error}") from last_error
+        raise DeviceConnectionError(t("cannot_reach_device", address=self.address, detail=last_error)) from last_error
 
     def json(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         raw = self.request(method, path, **kwargs)
@@ -107,9 +108,9 @@ class AScriptClient:
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise DeviceResponseError(f"invalid JSON response from {path}", body=raw[:1000].decode("utf-8", "replace")) from exc
+            raise DeviceResponseError(t("invalid_json", path=path), body=raw[:1000].decode("utf-8", "replace")) from exc
         if not isinstance(value, dict):
-            raise DeviceResponseError(f"expected object response from {path}", body=repr(value))
+            raise DeviceResponseError(t("expected_object", path=path), body=repr(value))
         return value
 
     @staticmethod
@@ -131,15 +132,27 @@ class AScriptClient:
         try:
             return self._ok(self.json("GET", "/api/status")).get("data", {})
         except DeviceOperationError as exc:
-            result: dict[str, Any] = {"available": True, "status_api_error": str(exc), "platform": self.ping()}
+            issue = "ios_objc_property_callable" if "ObjCStrInstance" in str(exc) and "callable" in str(exc) else "device_status_error"
+            result: dict[str, Any] = {
+                "available": True,
+                "health": "degraded",
+                "status_api_error": str(exc),
+                "compatibility": {
+                    "status_api": {"state": "degraded", "issue": issue, "message": t("status_fallback_summary")},
+                    "capabilities": {},
+                },
+                "platform": self.ping(),
+            }
             try:
                 result["screen"] = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
+                result["compatibility"]["capabilities"]["screen"] = "available"
             except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
-                pass
+                result["compatibility"]["capabilities"]["screen"] = "unavailable"
             try:
                 result["current_app"] = self.current_app()
+                result["compatibility"]["capabilities"]["current_app"] = "available"
             except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
-                pass
+                result["compatibility"]["capabilities"]["current_app"] = "unavailable"
             return result
 
     def packages(self) -> list[Any]:
@@ -426,14 +439,14 @@ class AScriptClient:
         try:
             sock = socket.create_connection((self.address.host, 10102), timeout=self.timeout)
         except OSError as exc:
-            raise DeviceConnectionError(f"cannot reach AScript log service at {self.address.host}:10102: {exc}") from exc
+            raise DeviceConnectionError(t("cannot_reach_logs", host=self.address.host, detail=exc)) from exc
         try:
             key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
             headers = ["GET /log/ HTTP/1.1", f"Host: {self.address.host}:10102", "Upgrade: websocket", "Connection: Upgrade", f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
             if self.password: headers.append(f"Cookie: airscript={self.password}")
             sock.sendall(("\r\n".join(headers) + "\r\n\r\n").encode("ascii"))
             if not self._read_until(sock, b"\r\n\r\n").startswith(b"HTTP/1.1 101"):
-                raise ProtocolError("AScript log endpoint rejected WebSocket upgrade")
+                raise ProtocolError(t("websocket_rejected"))
             sock.settimeout(0.5)
             while not stop_event or not stop_event.is_set():
                 if deadline is not None and time.monotonic() >= deadline: return

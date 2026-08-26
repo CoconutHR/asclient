@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -9,9 +10,13 @@ from typing import Any, Mapping
 DEFAULT_CONFIG_NAME = "asclient.json"
 
 
+def config_path(path: str | Path | None = None) -> Path:
+    return Path(path) if path else Path.cwd() / DEFAULT_CONFIG_NAME
+
+
 def load_config(path: str | Path | None = None, *, required: bool = False) -> dict[str, Any]:
     """Load a JSON object, returning an empty config when the default is absent."""
-    target = Path(path) if path else Path.cwd() / DEFAULT_CONFIG_NAME
+    target = config_path(path)
     if not target.is_file():
         if required: raise FileNotFoundError(target)
         return {}
@@ -20,6 +25,26 @@ def load_config(path: str | Path | None = None, *, required: bool = False) -> di
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON configuration {target}: {exc}") from exc
     if not isinstance(value, dict): raise ValueError(f"configuration {target} must be a JSON object")
+    return value
+
+
+def save_config(config: Mapping[str, Any], path: str | Path | None = None) -> Path:
+    """Atomically save a JSON configuration object without losing Unicode data."""
+    target = config_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(dict(config), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, target)
+    return target.resolve()
+
+
+def language_option(config: Mapping[str, Any]) -> str | None:
+    """Return the optional command-output language from a loaded config."""
+    value = config.get("language")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("configuration key 'language' must be a string")
     return value
 
 
