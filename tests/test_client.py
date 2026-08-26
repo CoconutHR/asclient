@@ -151,6 +151,7 @@ class ClientTests(unittest.TestCase):
         self.assertIn("where iproxy", message)
         self.assertIn("iproxy.exe", message)
         self.assertIn("tunnel.iproxy", message)
+        self.assertLess(message.index("未找到 iproxy"), message.index("iproxy executable not found"))
 
     def test_cli_requires_yes_for_state_changes(self):
         stderr = StringIO()
