@@ -92,6 +92,15 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(self.client.packages(), [["numpy", "1.0"], ["requests", "2.0"]])
         self.client.status, self.client.eval_python = original_status, original_eval
 
+    def test_project_file_paths_support_ios_childs_and_nested_directories(self):
+        tree = {"name": "demo", "isFile": False, "childs": [
+            {"name": "res", "isFile": False, "childs": [
+                {"name": "img", "isFile": False, "childs": [{"name": "logo.png", "isFile": True}]}
+            ]},
+            {"name": "__init__.py", "isFile": True},
+        ]}
+        self.assertEqual(self.client._project_file_paths(tree), ["__init__.py", "res/img/logo.png"])
+
 
 if __name__ == "__main__":
     unittest.main()

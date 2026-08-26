@@ -270,6 +270,44 @@ class AScriptClient:
     def project_files(self, name: str) -> Any:
         return self._ok(self.json("GET", "/api/module/files", params={"name": self._name(name)})).get("data", [])
 
+    @staticmethod
+    def _project_file_paths(tree: Any) -> list[str]:
+        """Normalize Android-style and iOS-4001 project file trees."""
+        paths: list[str] = []
+
+        def walk(node: Any, parent: str | None) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    walk(item, parent)
+                return
+            if not isinstance(node, dict):
+                return
+            name = str(node.get("name") or node.get("fileName") or "")
+            children = node.get("childs") or node.get("children") or node.get("files") or []
+            if children:
+                # The root returned by iOS has the project name. It is not part
+                # of the remote path below ~/modules/<project>/.
+                child_parent = "" if parent is None else "/".join(part for part in (parent, name) if part)
+                walk(children, child_parent)
+            elif name and (node.get("isFile") is True or (not node.get("dir") and not node.get("isDir") and parent is not None)):
+                paths.append(AScriptClient._relative("/".join(part for part in (parent or "", name) if part)))
+
+        walk(tree, None)
+        return sorted(set(paths))
+
+    def download_project(self, project: str, destination: str | Path) -> list[Path]:
+        """Download all project files, preserving their relative directories."""
+        project = self._name(project)
+        destination = Path(destination).resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        result: list[Path] = []
+        for relative in self._project_file_paths(self.project_files(project)):
+            target = destination.joinpath(*PurePosixPath(relative).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(self.read_file(f"~/modules/{project}/{relative}"))
+            result.append(target)
+        return result
+
     def run_project(self, name: str) -> None:
         self._ok(self.json("GET", "/api/module/run", params={"name": self._name(name)}))
 

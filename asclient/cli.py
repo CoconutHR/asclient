@@ -55,17 +55,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _flatten_files(node: Any) -> list[str]:
-    result: list[str] = []
-    if isinstance(node, list):
-        for item in node: result.extend(_flatten_files(item))
-    elif isinstance(node, dict):
-        children = node.get("children") or node.get("files") or []
-        if children: result.extend(_flatten_files(children))
-        elif node.get("name") and not node.get("dir") and not node.get("isDir"): result.append(str(node["name"]))
-    return result
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     client = _client(args)
@@ -98,9 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "push":
             source = Path(args.source); count = client.upload_tree(args.project, source) if source.is_dir() else (client.upload_file(args.project, source, args.remote) or 1); print(f"uploaded {count} file(s)")
         elif cmd == "pull":
-            root = Path(args.output); root.mkdir(parents=True, exist_ok=True)
-            for name in _flatten_files(client.project_files(args.project)):
-                target = root / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(client.read_file(f"~/modules/{args.project}/{name}")); print(target)
+            for target in client.download_project(args.project, args.output): print(target)
         elif cmd == "log":
             for entry in client.logs(duration=args.seconds): print(f"[{entry.kind}] {entry.timestamp} {entry.message}")
         elif cmd == "deploy":
