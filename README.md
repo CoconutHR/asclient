@@ -2,7 +2,7 @@
 
 `asclient` is a dependency-free Python client and CLI for AScript iOS local device services.
 
-Chinese production documentation: [docs/production-guide.md](docs/production-guide.md).
+Chinese documentation: [production guide](docs/production-guide.md) and [API reference](docs/api-reference.md).
 
 ```python
 from asclient import AScriptClient
