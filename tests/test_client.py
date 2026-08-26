@@ -1,3 +1,4 @@
+import base64
 import json
 import tempfile
 import threading
@@ -5,8 +6,9 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.request import urlopen
 
-from asclient import AScriptClient, DeviceOperationError
+from asclient import AScriptClient, Device, DeviceOperationError, connect
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -26,6 +28,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path); Handler.calls.append(("GET", parsed.path, parse_qs(parsed.query), b""))
         if parsed.path == "/api/screen/capture": return self._reply(b"PNG", content_type="image/png")
         if parsed.path == "/api/node/dump": return self._reply(b"<App/>", content_type="application/xml")
+        if parsed.path == "/api/tool/view/dump": return self._reply({"code": 1, "data": {"config": {"display": {"widthPixels": 100, "heightPixels": 200}}, "views": [{"type": "XCUIElementTypeButton", "name": "confirm", "label": "Confirm", "x": 10, "y": 20, "width": 30, "height": 40, "childs": []}]}})
         if parsed.path == "/api/module/create": return self._reply({"code": 1})
         self._reply({"code": 1, "data": []})
 
@@ -100,6 +103,33 @@ class ClientTests(unittest.TestCase):
             {"name": "__init__.py", "isFile": True},
         ]}
         self.assertEqual(self.client._project_file_paths(tree), ["__init__.py", "res/img/logo.png"])
+
+    def test_uiautomator_style_device_selector_resolves_and_clicks(self):
+        device = Device(self.client)
+        button = device(text="Confirm", class_name="XCUIElementTypeButton")
+        self.assertTrue(button.exists)
+        self.assertEqual(button.count, 1)
+        self.assertEqual(button.info["name"], "confirm")
+        button.click()
+        lookup = next(call for call in Handler.calls if call[1] == "/api/tool/view/dump")
+        selector = json.loads(lookup[2]["selector"][0])
+        self.assertEqual(selector["sel"][0], {"key": "label", "params": "Confirm"})
+        self.assertIn(b"ascript.ios.action", next(call for call in Handler.calls if call[1] == "/api/gp/eval")[3])
+
+    def test_connect_returns_a_device_facade(self):
+        self.assertIsInstance(connect(f"127.0.0.1:{self.server.server_port}", retries=0), Device)
+
+    def test_inspector_serves_a_loopback_snapshot(self):
+        from asclient.inspector import serve
+        server = serve(self.client, open_browser=False)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
+                snapshot = json.loads(response.read())
+            self.assertEqual(snapshot["tree"]["views"][0]["name"], "confirm")
+            self.assertEqual(base64.b64decode(snapshot["image"]), b"PNG")
+        finally:
+            server.shutdown(); server.server_close()
 
 
 if __name__ == "__main__":

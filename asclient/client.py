@@ -197,6 +197,18 @@ class AScriptClient:
             params["selector"] = json.dumps(selector, ensure_ascii=False)
         return self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
 
+    def find_elements(self, selector: Mapping[str, Any], *, mode: str = "smart", x: float = 0, y: float = 0) -> list[dict[str, Any]]:
+        """Resolve an AScript selector and return its matching element metadata.
+
+        ``selector`` follows the documented AScript view-tree contract, for
+        example ``{"sel": [{"key": "label", "params": "OK"}], "find": 99999}``.
+        """
+        data = self.ui_tree(mode=mode, selector=selector, x=x, y=y)
+        views = data.get("views") or []
+        if not isinstance(views, list):
+            raise DeviceResponseError("invalid element list returned by device", body=repr(views))
+        return [dict(view) for view in views if isinstance(view, Mapping)]
+
     def current_app(self) -> dict[str, Any]:
         return self._ok(self.json("GET", "/api/node/package")).get("data", {})
 

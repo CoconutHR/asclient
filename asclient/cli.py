@@ -35,6 +35,8 @@ def _parser() -> argparse.ArgumentParser:
     shot = commands.add_parser("shot"); shot.add_argument("output", nargs="?", default="screenshot.png")
     dump = commands.add_parser("dump"); dump.add_argument("output", nargs="?", default="dump.xml"); dump.add_argument("--mode", default="smart")
     observe = commands.add_parser("observe"); observe.add_argument("--prefix", default="observe")
+    inspect = commands.add_parser("inspect", help="start the local browser UI inspector")
+    inspect.add_argument("--host", default="127.0.0.1"); inspect.add_argument("--port", type=int, default=0); inspect.add_argument("--no-browser", action="store_true")
     ev = commands.add_parser("eval"); ev.add_argument("code")
     cat = commands.add_parser("cat"); cat.add_argument("path"); cat.add_argument("output", nargs="?")
     ocr = commands.add_parser("ocr"); ocr.add_argument("rect", nargs="?")
@@ -69,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "observe":
             stamp = time.strftime("%Y%m%d_%H%M%S"); image, xml = Path(f"{args.prefix}_{stamp}.png"), Path(f"{args.prefix}_{stamp}.xml")
             print(client.save_screenshot(image)); xml.write_text(client.ui_xml(), encoding="utf-8"); print(xml.resolve())
+        elif cmd == "inspect":
+            from .inspector import run_forever
+            print("Inspector is running. Press Ctrl+C to stop.")
+            run_forever(client, host=args.host, port=args.port, open_browser=not args.no_browser)
         elif cmd == "eval": _out(client.eval_python(args.code))
         elif cmd == "cat":
             data = client.read_file(args.path)

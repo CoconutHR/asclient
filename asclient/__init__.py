@@ -1,6 +1,12 @@
 """Dependency-free client for AScript's local iOS device service."""
 
 from .client import AScriptClient, DeviceAddress, LogEntry
+from .automation import Device, Selector, UiCollection, UiObject
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError
 
-__all__ = ["AScriptClient", "DeviceAddress", "LogEntry", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError"]
+
+def connect(address: str, *, password: str = "", timeout: float = 15.0, retries: int = 1) -> Device:
+    """Connect to an AScript device using a uiautomator2-like entry point."""
+    return Device(AScriptClient(address, password=password, timeout=timeout, retries=retries))
+
+__all__ = ["AScriptClient", "DeviceAddress", "LogEntry", "Device", "Selector", "UiCollection", "UiObject", "connect", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError"]
