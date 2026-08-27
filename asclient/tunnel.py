@@ -5,7 +5,12 @@ import socket
 import subprocess
 import sys
 import time
+import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .config import load_config, tunnel_options
 from .errors import IProxyNotFoundError, TunnelError
 from .i18n import t
 
@@ -158,6 +163,42 @@ class AScriptTunnel:
         self.service = IProxyTunnel(self.local_port, self.remote_port, **common)
         if self.forward_logs:
             self.logs = IProxyTunnel(self.local_log_port, self.remote_log_port, **common)
+
+    # 配置文件键名到构造函数字段名的映射；iproxy 与 executable 例外。
+    _CONFIG_FIELDS = {
+        "iproxy": "executable",
+        "local_port": "local_port",
+        "remote_port": "remote_port",
+        "local_log_port": "local_log_port",
+        "remote_log_port": "remote_log_port",
+        "forward_logs": "forward_logs",
+        "udid": "udid",
+        "local_host": "local_host",
+        "startup_timeout": "startup_timeout",
+    }
+
+    @classmethod
+    def from_config(cls, path: str | Path | None = None, **overrides: Any) -> "AScriptTunnel":
+        """从配置文件的 ``tunnel`` 段创建隧道；显式参数优先。
+
+        优先级为“显式参数 > 配置文件 > 内置默认值”；参数名与
+        ``asclient.json`` 的 ``tunnel`` 键一致（``iproxy``、``udid``、
+        端口等）。``path`` 指定配置文件，默认读取当前目录的
+        ``asclient.json``；文件不存在时退回内置默认值，不确定配置
+        是否被读取时可用 ``py -m asclient doctor`` 检查。过时别名
+        ``executable`` 等效 ``iproxy``，使用时会发出
+        ``DeprecationWarning``，将在后续版本移除。
+        """
+        if "executable" in overrides:
+            if "iproxy" in overrides: raise ValueError(t("tunnel_config_conflict"))
+            warnings.warn(t("tunnel_executable_deprecated"), DeprecationWarning, stacklevel=2)
+            overrides["iproxy"] = overrides.pop("executable")
+        unknown = sorted(set(overrides) - set(cls._CONFIG_FIELDS))
+        if unknown: raise ValueError(t("tunnel_config_unknown", keys=", ".join(unknown)))
+        config = tunnel_options(load_config(path))
+        options = {target: config[key] for key, target in cls._CONFIG_FIELDS.items() if key in config}
+        options.update({target: overrides[key] for key, target in cls._CONFIG_FIELDS.items() if key in overrides})
+        return cls(**options)
 
     @property
     def address(self) -> str:

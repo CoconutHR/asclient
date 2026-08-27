@@ -122,6 +122,9 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "iproxy_missing_linux": ("未找到 iproxy 可执行文件: {executable}。\nLinux：安装发行版提供的 libimobiledevice 包后执行 'command -v iproxy' 验证，或设置 tunnel.iproxy 为绝对路径。", "iproxy executable not found: {executable}.\nLinux: install your distribution's libimobiledevice package and verify with 'command -v iproxy', or set tunnel.iproxy to its absolute path."),
     "tunnel_exited": ("USB 隧道意外退出：{detail}", "USB tunnel exited unexpectedly: {detail}"),
     "tunnel_route_exited": ("{route} 映射已退出（{address} -> 设备:{remote_port}）：{detail}", "{route} forwarding exited ({address} -> device:{remote_port}): {detail}"),
+    "tunnel_executable_deprecated": ("参数 executable 已过时，请改用 iproxy；该别名将在后续版本移除。", "the 'executable' parameter is deprecated; use 'iproxy' instead. The alias will be removed in a future release."),
+    "tunnel_config_conflict": ("executable 与 iproxy 不能同时使用；executable 已过时，请只使用 iproxy。", "'executable' and 'iproxy' cannot be combined; 'executable' is deprecated, use only 'iproxy'."),
+    "tunnel_config_unknown": ("from_config 不支持的参数：{keys}。可用参数为 iproxy、local_port、remote_port、local_log_port、remote_log_port、forward_logs、udid、local_host、startup_timeout。", "unsupported from_config parameter(s): {keys}. Supported parameters are iproxy, local_port, remote_port, local_log_port, remote_log_port, forward_logs, udid, local_host, and startup_timeout."),
 }
 
 

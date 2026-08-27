@@ -308,6 +308,30 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(tunnel.logs.command if tunnel.logs else None, ["custom-iproxy", "-u", "abc", "11002", "10102"])
         self.assertIsNone(AScriptTunnel(forward_logs=False).log_address)
 
+    def test_tunnel_from_config_reads_the_tunnel_section(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asclient.json"
+            path.write_text(json.dumps({"tunnel": {"iproxy": "custom-iproxy", "local_port": 19096, "udid": "abc", "unknown": "ignored"}}), encoding="utf-8")
+            tunnel = AScriptTunnel.from_config(path)
+            self.assertEqual(tunnel.address, "127.0.0.1:19096")
+            self.assertEqual(tunnel.service.command, ["custom-iproxy", "-u", "abc", "19096", "9096"])
+            # 显式参数优先于配置文件；未覆盖的键继续沿用配置。
+            overridden = AScriptTunnel.from_config(path, udid="device-b", local_port=29096)
+            self.assertEqual(overridden.service.command, ["custom-iproxy", "-u", "device-b", "29096", "9096"])
+            # 配置文件不存在时退回内置默认值。
+            self.assertEqual(AScriptTunnel.from_config(Path(directory) / "missing.json").address, "127.0.0.1:9096")
+
+    def test_tunnel_from_config_supports_and_rejects_parameter_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asclient.json"
+            path.write_text('{"tunnel": {"iproxy": "custom-iproxy", "local_port": 19096, "udid": "abc"}}', encoding="utf-8")
+            # 过时别名 executable 仍可用，但发出弃用警告。
+            with self.assertWarns(DeprecationWarning):
+                aliased = AScriptTunnel.from_config(path, executable="alias-iproxy")
+            self.assertEqual(aliased.service.command, ["alias-iproxy", "-u", "abc", "19096", "9096"])
+            with self.assertRaises(ValueError): AScriptTunnel.from_config(path, executable="a", iproxy="b")
+            with self.assertRaises(ValueError): AScriptTunnel.from_config(path, unknown=1)
+
     def test_missing_iproxy_message_is_actionable_on_windows(self):
         set_language("zh-CN")
         try:
