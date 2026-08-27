@@ -2,7 +2,7 @@
 
 `asclient` 是 AScript iOS 本地设备服务的 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力；仅本机模板匹配功能依赖 Pillow。
 
-完整中文文档： [生产使用指南](docs/production-guide.md)、[API 使用参考](docs/api-reference.md)、[USB 隧道运维指南](docs/usb-tunnel.md)、[发布与验收流程](docs/release-process.md)。
+完整中文文档： [从零开始使用教程](docs/quick-start.md)、[生产使用指南](docs/production-guide.md)、[API 使用参考](docs/api-reference.md)、[USB 隧道运维指南](docs/usb-tunnel.md)、[发布与验收流程](docs/release-process.md)。
 
 ## IDE 提示
 
