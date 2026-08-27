@@ -1,13 +1,9 @@
-"""uiautomator2-inspired automation primitives for AScript iOS devices.
-
-The mobile service remains unchanged.  Selectors are serialized to AScript's
-existing ``/api/tool/view/dump`` selector protocol, and actions use the
-already-public coordinate APIs.
-"""
+"""uiautomator2-inspired automation primitives for AScript iOS devices."""
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, TYPE_CHECKING
 
 from .i18n import t
@@ -18,11 +14,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Selector:
-    """不可变 AScript 控件选择器。
-
-    ``device(text="Continue", type="XCUIElementTypeButton")`` is the most
-    convenient entry point.  ``contains`` changes matching for one property.
-    """
+    """不可变 AScript 控件选择器。"""
 
     attributes: tuple[tuple[str, Any, int], ...] = ()
     mode: str = "smart"
@@ -79,12 +71,20 @@ class Selector:
         return head + "".join(calls)
 
 
+def _matches(info: Mapping[str, Any], selector: Selector) -> bool:
+    for key, expected, match in selector.attributes:
+        actual = info.get(key)
+        if match == Selector.CONTAINS:
+            if str(expected) not in str(actual or ""):
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
 @dataclass
 class UiObject:
-    """A resolved UI element.
-
-    Element rectangles and actions both use physical screen pixels.
-    """
+    """A resolved UI element whose coordinates are physical screenshot pixels."""
 
     device: "Device"
     info: Mapping[str, Any]
@@ -92,8 +92,7 @@ class UiObject:
 
     @property
     def rect(self) -> dict[str, float]:
-        info = self.info
-        return {"x": float(info.get("x") or 0), "y": float(info.get("y") or 0), "width": float(info.get("width") or 0), "height": float(info.get("height") or 0)}
+        return {"x": float(self.info.get("x") or 0), "y": float(self.info.get("y") or 0), "width": float(self.info.get("width") or 0), "height": float(self.info.get("height") or 0)}
 
     @property
     def center(self) -> tuple[float, float]:
@@ -103,90 +102,145 @@ class UiObject:
     @property
     def exists(self) -> bool: return True
 
-    def click(self) -> Any:
-        return self.device.client.tap(*self.center)
-
+    def click(self) -> Any: return self.device.client.tap(*self.center)
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any:
         self.click()
         return self.device.client.input_text(text, interval_ms=interval_ms)
+    def screenshot(self, destination: str | Path | None = None) -> bytes | Path:
+        frame = self.device.client.capture_frame()
+        rect = self.rect
+        left, top = max(0, int(rect["x"])), max(0, int(rect["y"]))
+        right, bottom = min(frame.width, int(rect["x"] + rect["width"])), min(frame.height, int(rect["y"] + rect["height"]))
+        if left >= right or top >= bottom: raise ValueError("element has an empty rectangle")
+        from PIL import Image
+        from io import BytesIO
+        with Image.open(BytesIO(frame.png)) as image:
+            output = BytesIO(); image.crop((left, top, right, bottom)).save(output, "PNG")
+        data = output.getvalue()
+        if destination is None: return data
+        target = Path(destination); target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
+        return target.resolve()
+
+
+@dataclass(frozen=True)
+class SnapshotNode:
+    snapshot: "UiSnapshot"
+    index: int
+
+    @property
+    def info(self) -> Mapping[str, Any]: return self.snapshot._nodes[self.index]
+    @property
+    def object(self) -> UiObject: return UiObject(self.snapshot.device, self.info, Selector(mode=self.snapshot.mode))
+    @property
+    def rect(self) -> dict[str, float]: return self.object.rect
+    @property
+    def center(self) -> tuple[float, float]: return self.object.center
+    def click(self) -> Any: return self.object.click()
+    def set_text(self, text: str, *, interval_ms: int = 120) -> Any: return self.object.set_text(text, interval_ms=interval_ms)
+
+
+class SnapshotCollection:
+    """Locally queried nodes from one immutable ``UiSnapshot``."""
+
+    def __init__(self, snapshot: "UiSnapshot", indices: tuple[int, ...]):
+        self.snapshot, self.indices = snapshot, indices
+
+    @property
+    def exists(self) -> bool: return bool(self.indices)
+    @property
+    def count(self) -> int: return len(self.indices)
+    @property
+    def info(self) -> Mapping[str, Any]:
+        if not self.indices: raise LookupError("element not found in snapshot")
+        return self.snapshot._nodes[self.indices[0]]
+    def all(self) -> list[SnapshotNode]: return [SnapshotNode(self.snapshot, index) for index in self.indices]
+    def get(self) -> SnapshotNode | None: return self.all()[0] if self.indices else None
+    def child(self, selector: Selector | None = None) -> "SnapshotCollection":
+        indices = tuple(child for index in self.indices for child in self.snapshot._children[index])
+        return self.snapshot._filter(indices, selector)
+    def descendant(self, selector: Selector | None = None) -> "SnapshotCollection":
+        result: list[int] = []
+        def walk(index: int) -> None:
+            for child in self.snapshot._children[index]:
+                result.append(child); walk(child)
+        for index in self.indices: walk(index)
+        return self.snapshot._filter(tuple(result), selector)
+    def parent(self, selector: Selector | None = None) -> "SnapshotCollection":
+        return self.snapshot._filter(tuple(index for item in self.indices if (index := self.snapshot._parents[item]) is not None), selector)
+    def sibling(self, selector: Selector | None = None) -> "SnapshotCollection":
+        result: list[int] = []
+        for index in self.indices:
+            parent = self.snapshot._parents[index]
+            if parent is not None: result.extend(item for item in self.snapshot._children[parent] if item != index)
+        return self.snapshot._filter(tuple(dict.fromkeys(result)), selector)
+
+
+class UiSnapshot:
+    """One full UI tree queried locally without further device requests."""
+
+    def __init__(self, device: "Device", tree: Mapping[str, Any], *, mode: str):
+        self.device, self.tree, self.mode = device, dict(tree), mode
+        self._nodes: list[dict[str, Any]] = []
+        self._parents: list[int | None] = []
+        self._children: list[tuple[int, ...]] = []
+        def visit(node: Mapping[str, Any], parent: int | None) -> int:
+            index = len(self._nodes); info = {key: value for key, value in node.items() if key != "childs"}
+            self._nodes.append(info); self._parents.append(parent); self._children.append(())
+            children = tuple(visit(child, index) for child in (node.get("childs") or []) if isinstance(child, Mapping))
+            self._children[index] = children
+            return index
+        for root in self.tree.get("views") or []:
+            if isinstance(root, Mapping): visit(root, None)
+
+    def _filter(self, indices: tuple[int, ...], selector: Selector | None) -> SnapshotCollection:
+        return SnapshotCollection(self, tuple(index for index in indices if selector is None or _matches(self._nodes[index], selector)))
+    def __call__(self, **attributes: Any) -> SnapshotCollection: return self.select(self.device.selector(**attributes))
+    def select(self, selector: Selector) -> SnapshotCollection: return self._filter(tuple(range(len(self._nodes))), selector)
+    def roots(self) -> SnapshotCollection: return SnapshotCollection(self, tuple(index for index, parent in enumerate(self._parents) if parent is None))
 
 
 @dataclass
 class Device:
-    """类似 uiautomator2 的高层设备入口。
-
-    通过 ``device(text="确定")`` 创建控件集合；坐标均为物理像素。
-    """
+    """类似 uiautomator2 的高层设备入口。"""
 
     client: "AScriptClient"
 
     def selector(self, *, mode: str = "smart", **attributes: Any) -> Selector:
         selector = Selector(mode=mode)
         aliases = {"text": "label", "resource_id": "name", "description": "name", "class_name": "type"}
-        for key, value in attributes.items():
-            selector = selector.with_attr(aliases.get(key, key), value)
+        for key, value in attributes.items(): selector = selector.with_attr(aliases.get(key, key), value)
         return selector
-
-    def __call__(self, **attributes: Any) -> "UiCollection":
-        return UiCollection(self, self.selector(**attributes))
-
+    def __call__(self, **attributes: Any) -> "UiCollection": return UiCollection(self, self.selector(**attributes))
+    def snapshot(self, *, mode: str = "full") -> UiSnapshot: return UiSnapshot(self, self.client.ui_tree(mode=mode), mode=mode)
     def find_all(self, selector: Selector) -> list[UiObject]:
         data = self.client.ui_tree(selector=selector.payload(), mode=selector.mode, x=(selector.point or (0, 0))[0], y=(selector.point or (0, 0))[1])
         views = data.get("views") or []
-        if not isinstance(views, list):
-            raise ValueError("invalid element list returned by device")
+        if not isinstance(views, list): raise ValueError("invalid element list returned by device")
         return [UiObject(self, dict(item), selector) for item in views if isinstance(item, Mapping)]
-
-    def find(self, selector: Selector, *, timeout: float = 0, log: bool = False) -> UiObject | None:
-        return UiCollection(self, selector).get(timeout=timeout, log=log)
-
+    def find(self, selector: Selector, *, timeout: float = 0, log: bool = False) -> UiObject | None: return UiCollection(self, selector).get(timeout=timeout, log=log)
     def wait(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> UiObject:
-        """等待控件出现；``timeout`` 单位秒，``log`` 输出每轮检查。"""
         result = self.find(selector, timeout=timeout, log=log)
         if result is None: raise LookupError(f"element did not appear within {timeout}s: {selector.code()}")
         return result
-
-    def wait_gone(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> bool:
-        """等待控件消失；超时返回 ``False``。"""
-        return UiCollection(self, selector).wait_gone(timeout=timeout, log=log)
-
-    def dump_hierarchy(self, *, mode: str = "smart") -> str:
-        return self.client.ui_xml(mode=mode)
-
-    def screenshot(self, destination: str | None = None) -> bytes | Any:
-        return self.client.save_screenshot(destination) if destination else self.client.screenshot()
-
-    def click_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
-        """Click a point expressed as fractions of the current screen dimensions."""
-        return self.client.tap_relative(x_ratio, y_ratio, duration_ms=duration_ms)
-
-    def click_rel(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
-        """Short uiautomator2-style alias for :meth:`click_relative`."""
-        return self.click_relative(x_ratio, y_ratio, duration_ms=duration_ms)
-
-    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any:
-        """Swipe between two fractional screen coordinates."""
-        return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration_ms=duration_ms)
-
-    def scroll_until_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
-        """Scroll upward until a local image template appears."""
-        return self.client.scroll_until_image(template, **kwargs)
-
-    def find_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
-        """Find a local image template in the current screenshot."""
-        return self.client.find_image(template, **kwargs)
-
-    def wait_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
-        """Wait until a local image template appears."""
-        return self.client.wait_image(template, **kwargs)
-
-    def wait_image_gone(self, template: str | Path | bytes, **kwargs: Any) -> bool:
-        """Wait until a local image template disappears."""
-        return self.client.wait_image_gone(template, **kwargs)
-
-    def tap_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
-        """Wait for a local image template and tap its center."""
-        return self.client.tap_image(template, **kwargs)
+    def wait_gone(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> bool: return UiCollection(self, selector).wait_gone(timeout=timeout, log=log)
+    def dump_hierarchy(self, *, mode: str = "smart") -> str: return self.client.ui_xml(mode=mode)
+    def screenshot(self, destination: str | None = None) -> bytes | Any: return self.client.save_screenshot(destination) if destination else self.client.screenshot()
+    def click_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any: return self.client.tap_relative(x_ratio, y_ratio, duration_ms=duration_ms)
+    def click_rel(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any: return self.click_relative(x_ratio, y_ratio, duration_ms=duration_ms)
+    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any: return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration_ms=duration_ms)
+    def capture_frame(self) -> Any: return self.client.capture_frame()
+    def pixel(self, x: int, y: int) -> Any: return self.client.pixel(x, y)
+    def pixel_relative(self, x_ratio: float, y_ratio: float) -> Any: return self.client.pixel_relative(x_ratio, y_ratio)
+    def pixels(self, points: Any) -> Any: return self.client.pixels(points)
+    def pixels_relative(self, points: Any) -> Any: return self.client.pixels_relative(points)
+    def scroll_until_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.scroll_until_image(template, **kwargs)
+    def find_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.find_image(template, **kwargs)
+    def find_images(self, templates: Mapping[str, str | Path | bytes], **kwargs: Any) -> Any: return self.client.find_images(templates, **kwargs)
+    def find_any_image(self, templates: Mapping[str, str | Path | bytes], **kwargs: Any) -> Any: return self.client.find_any_image(templates, **kwargs)
+    def wait_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.wait_image(template, **kwargs)
+    def wait_any_image(self, templates: Mapping[str, str | Path | bytes], **kwargs: Any) -> Any: return self.client.wait_any_image(templates, **kwargs)
+    def wait_image_gone(self, template: str | Path | bytes, **kwargs: Any) -> bool: return self.client.wait_image_gone(template, **kwargs)
+    def tap_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.tap_image(template, **kwargs)
 
 
 @dataclass
@@ -194,7 +248,6 @@ class UiCollection:
     """一个选择器对应的延迟查询控件集合。"""
     device: Device
     selector: Selector
-
     @property
     def exists(self) -> bool: return bool(self.all())
     @property
@@ -204,14 +257,12 @@ class UiCollection:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
         return item.info
-
     def all(self) -> list[UiObject]: return self.device.find_all(self.selector)
+    def snapshot(self, *, mode: str = "full") -> SnapshotCollection: return self.device.snapshot(mode=mode).select(self.selector)
     def get(self, *, timeout: float = 0, log: bool = False) -> UiObject | None:
-        deadline = time.monotonic() + timeout
-        attempt = 0
+        deadline = time.monotonic() + timeout; attempt = 0
         while True:
-            attempt += 1
-            found = self.all()
+            attempt += 1; found = self.all()
             if found:
                 if log: print(t("selector_wait_found", attempt=attempt, selector=self.selector.code()))
                 return found[0]
@@ -219,8 +270,7 @@ class UiCollection:
             if time.monotonic() >= deadline: return None
             time.sleep(min(0.3, deadline - time.monotonic()))
     def wait_gone(self, *, timeout: float = 10.0, log: bool = False) -> bool:
-        deadline = time.monotonic() + timeout
-        attempt = 0
+        deadline = time.monotonic() + timeout; attempt = 0
         while True:
             attempt += 1
             if not self.exists:
@@ -236,8 +286,7 @@ class UiCollection:
     def click_exists(self, *, timeout: float = 0) -> bool:
         item = self.get(timeout=timeout)
         if item is None: return False
-        item.click()
-        return True
+        item.click(); return True
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")

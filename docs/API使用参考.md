@@ -133,7 +133,8 @@ assert client.ping() == "iOS"
         "capabilities": {"screen": "available", "current_app": "available"}
     },
     "platform": "iOS",
-    "screen": {"width": 393, "height": 852},
+    "logical_screen": {"width": 393, "height": 852},
+    "screen": {"width": 1179, "height": 2556},
     "current_app": {"bundle_id": "..."},
 }
 ```
@@ -186,21 +187,61 @@ artifact = client.save_screenshot("artifacts/current.png")
 抓取截图后按比例裁剪。四个参数均为 `0.0..1.0`，矩形为左上包含、右下排除；必须满足 `left < right`、`top < bottom`。`save_screenshot_crop_relative(destination, left, top, right, bottom)` 会直接保存裁剪结果并返回绝对路径。
 
 ```python
-# 取得下半屏 PNG 字节或直接保存。
+# 取得下半屏 PNG 字节或直接保存；比例矩形。
 bottom = client.screenshot_crop_relative(0, 0.5, 1, 1)
 client.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
+
+# 物理像素矩形：left, top, right, bottom。
+button = client.screenshot_crop(0, 1800, 1179, 2556)
+client.save_screenshot_crop("artifacts/bottom.png", 0, 1800, 1179, 2556)
 ```
 
 实现无第三方依赖，支持移动端截图使用的非隔行 8 位 RGB/RGBA PNG；非标准 PNG 会抛出 `DeviceResponseError`。
 
-### `find_image()`、`wait_image()` 与 `wait_image_gone()`
+### `capture_frame()`、`pixel()` 与 `pixels()`
 
-在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。`region=(left, top, right, bottom)` 可限制比例搜索区域。
+`capture_frame()` 抓取一张物理像素截图，返回 `ScreenFrame`。同一帧可完成多个取色或找图操作，不会重复抓屏。`PixelColor` 为强类型 RGBA 颜色，默认以 `.rgb` 返回三元组，也可用 `.hex` 获取大写十六进制字符串。
+
+```python
+frame = client.capture_frame()
+color = frame.pixel(100, 200)             # 绝对物理像素
+print(color.rgb)                          # (255, 128, 0)
+print(color.hex)                          # "#FF8000"
+
+# 比例坐标：屏幕宽度 50%、高度 92%。
+color = frame.pixel_relative(0.5, 0.92)
+colors = frame.pixels([(100, 200), (300, 400)])
+colors = frame.pixels_relative([(0.1, 0.1), (0.9, 0.9)])
+```
+
+`client.pixel()`、`client.pixel_relative()`、`client.pixels()` 和 `client.pixels_relative()` 是便利入口，各自抓取一张新帧；需要多次检查时优先使用同一个 `frame`。绝对点必须在截图边界内，比例坐标范围为 `0..1`，`1.0` 会夹紧到最后一个有效物理像素。
+
+### `find_image()`、`find_images()`、`find_any_image()` 与 `wait_any_image()`
+
+在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有结果坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。
+
+单模板可用比例 `region=(left, top, right, bottom)` 或绝对物理像素 `region_pixels=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_pixels` 为按模板名称映射的同类区域；每张模板可有自己的小区域。
 
 ```python
 match = client.find_image("assets/login-icon.png", confidence=0.95)
 if match:
     print(match.center)
+
+# 绝对物理像素区域：只搜索底部区域。
+match = client.find_image("assets/login-icon.png", region_pixels=(0, 1800, 1179, 2556))
+
+# 一帧截图匹配多个模板；每个模板使用自己的比例检测区域。
+matches = client.find_images(
+    {"success": "assets/success.png", "retry": "assets/retry.png"},
+    confidence=0.95,
+    regions={"success": (0, 0.2, 1, 0.8), "retry": (0, 0.7, 1, 1)},
+)
+
+# 等待成功页或错误页任一出现；返回 (名称, ImageMatch)。
+name, match = client.wait_any_image(
+    {"success": "assets/success.png", "failure": "assets/failure.png"},
+    timeout=20,
+)
 
 match = client.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, interval=0.5, log=True)
 client.tap(*match.center)
@@ -344,9 +385,27 @@ if element is None:
 
 未传 `destination` 时返回 PNG bytes；传入本地路径时保存并返回 `Path`。
 
+#### `snapshot(*, mode="full") -> UiSnapshot`
+
+读取一次完整控件树并创建本地快照。快照内的选择器和关系查询不再访问设备，适合需要在同一棵树上多次定位的场景。推荐 `mode="full"`，因为关系查询依赖完整的 `childs` 层级。
+
+```python
+snapshot = device.snapshot(mode="full")
+login_form = snapshot(name="login_form")
+submit = login_form.child(device.selector().name("submit_button"))
+error_text = login_form.descendant(device.selector().text("密码错误"))
+parent = submit.parent()
+siblings = submit.sibling()
+
+assert submit.count == 1
+submit.get().click()
+```
+
+`SnapshotCollection` 支持 `.exists`、`.count`、`.info`、`.all()`、`.get()`，以及 `.child()`（直接子节点）、`.descendant()`（所有后代）、`.parent()`、`.sibling()`。关系选择器只在本地快照中解释，绝不会发送给设备端 selector 协议。快照节点的 `info`、`rect`、`center` 已归一化为物理像素，但页面跳转后可能过期；在动作前需要最新页面状态时，请重新创建快照或使用普通 `device(...)` 查询。
+
 #### 坐标与图片委托
 
-`Device` 也直接暴露以下方法，语义与 `AScriptClient` 同名方法完全一致，方便只持有 `device` 时调用：`click_relative()` / `click_rel()`、`swipe_relative()`、`find_image()`、`wait_image()`、`wait_image_gone()`、`tap_image()`、`scroll_until_image()`。参数见第 3 节与第 7 节的同名方法。
+`Device` 也直接暴露以下方法，语义与 `AScriptClient` 同名方法完全一致，方便只持有 `device` 时调用：`capture_frame()`、`pixel()` / `pixel_relative()`、`pixels()` / `pixels_relative()`、`click_relative()` / `click_rel()`、`swipe_relative()`、`find_image()`、`find_images()`、`find_any_image()`、`wait_image()`、`wait_any_image()`、`wait_image_gone()`、`tap_image()`、`scroll_until_image()`。参数见第 3 节与第 7 节的同名方法。
 
 ### `Selector`
 

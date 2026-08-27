@@ -22,6 +22,7 @@ from typing import Any, Iterator, Mapping, Optional
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
 from .i18n import t
 from .runtime import device_lock
+from .vision import PixelColor, ScreenFrame, relative_point as _relative_frame_point
 
 
 @dataclass(frozen=True)
@@ -215,12 +216,7 @@ class AScriptClient:
         return float(width), float(height)
 
     def action_size(self) -> dict[str, float]:
-        """返回 ``tap``、``swipe``、OCR 使用的物理像素尺寸。
-
-        AScript's iOS action module uses screenshot pixels, while
-        :meth:`screen_size` reports iOS logical points.  The two must not be
-        mixed on Retina devices.
-        """
+        """返回 ``tap``、``swipe``、OCR 使用的截图物理像素尺寸。"""
         size = self._png_size(self.screenshot())
         if size is None:
             raise DeviceResponseError("invalid PNG returned by screenshot endpoint")
@@ -229,10 +225,30 @@ class AScriptClient:
     def screen_size(self) -> dict[str, float]:
         """返回当前真实物理屏幕分辨率。
 
-        This is the same coordinate system as screenshots, OCR, ``tap`` and
-        ``swipe``.
+        与截图、OCR、``tap``、``swipe`` 使用同一物理像素坐标系；
+        设备端 ``/api/screen/size`` 的逻辑点尺寸由内部 ``_logical_screen`` 使用。
         """
         return self.action_size()
+
+    def capture_frame(self) -> ScreenFrame:
+        """抓取一张物理像素截图，供取色和多个视觉查询共享。"""
+        return ScreenFrame(self.screenshot())
+
+    def pixel(self, x: int, y: int) -> PixelColor:
+        """读取物理像素坐标 ``x/y`` 的 RGBA 颜色。"""
+        return self.capture_frame().pixel(x, y)
+
+    def pixel_relative(self, x_ratio: float, y_ratio: float) -> PixelColor:
+        """按屏幕宽高比例读取一个像素颜色。"""
+        return self.capture_frame().pixel_relative(x_ratio, y_ratio)
+
+    def pixels(self, points: Iterator[tuple[int, int]] | list[tuple[int, int]] | tuple[tuple[int, int], ...]) -> list[PixelColor]:
+        """在同一张截图中读取多个物理像素坐标。"""
+        return self.capture_frame().pixels(points)
+
+    def pixels_relative(self, points: Iterator[tuple[float, float]] | list[tuple[float, float]] | tuple[tuple[float, float], ...]) -> list[PixelColor]:
+        """在同一张截图中读取多个比例坐标。"""
+        return self.capture_frame().pixels_relative(points)
 
     def save_screenshot(self, destination: str | Path) -> Path:
         """保存完整 PNG 截图到 ``destination``，返回绝对路径。"""
@@ -295,11 +311,12 @@ class AScriptClient:
         return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(cropped)) + chunk(b"IEND", b"")
 
     def screenshot_crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
-        """抓取并按 ``left, top, right, bottom`` 比例裁剪 PNG。
+        """抓取并按比例裁剪 PNG。"""
+        return self.capture_frame().crop_relative(left, top, right, bottom)
 
-        四个值范围 ``0..1``，表示左、上、右、下边界。
-        """
-        return self.crop_png_relative(self.screenshot(), left, top, right, bottom)
+    def screenshot_crop(self, left: int, top: int, right: int, bottom: int) -> bytes:
+        """抓取并按物理像素矩形裁剪 PNG。"""
+        return self.capture_frame().crop_pixels(left, top, right, bottom)
 
     def save_screenshot_crop_relative(self, destination: str | Path, left: float, top: float, right: float, bottom: float) -> Path:
         """Capture a relative crop and save it as PNG."""
@@ -308,58 +325,34 @@ class AScriptClient:
         destination.write_bytes(self.screenshot_crop_relative(left, top, right, bottom))
         return destination.resolve()
 
+    def save_screenshot_crop(self, destination: str | Path, left: int, top: int, right: int, bottom: int) -> Path:
+        """Capture a physical-pixel crop and save it as PNG."""
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(self.screenshot_crop(left, top, right, bottom))
+        return destination.resolve()
+
     @staticmethod
     def _image_match(image: bytes, template: str | Path | bytes, *, confidence: float, region: tuple[float, float, float, float] | None) -> ImageMatch | None:
-        try:
-            from PIL import Image
-        except ImportError as exc:
-            raise RuntimeError("image matching requires Pillow; reinstall asclient to install its dependencies") from exc
-        if not math.isfinite(confidence) or not 0 < confidence <= 1:
-            raise ValueError("confidence must be a finite number in (0, 1]")
-        from io import BytesIO
-        source = Image.open(BytesIO(image)).convert("RGB")
-        template_image = Image.open(BytesIO(template) if isinstance(template, bytes) else str(template)).convert("RGB")
-        screen_width, screen_height = source.size; template_width, template_height = template_image.size
-        if template_width > screen_width or template_height > screen_height: return None
-        if region is None: left, top, right, bottom = 0, 0, 1, 1
-        else: left, top, right, bottom = (float(value) for value in region)
-        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
-            raise ValueError("region must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
-        x0, y0, x1, y1 = int(screen_width * left), int(screen_height * top), int(screen_width * right), int(screen_height * bottom)
-        x1, y1 = min(x1, screen_width), min(y1, screen_height)
-        if x1 - x0 < template_width or y1 - y0 < template_height: return None
-        source_pixels, template_pixels = source.load(), template_image.load()
-        sample_x = sorted({round(index * (template_width - 1) / 7) for index in range(8)})
-        sample_y = sorted({round(index * (template_height - 1) / 7) for index in range(8)})
-        sample_count = len(sample_x) * len(sample_y) * 3; allowed = (1 - confidence) * 255 * sample_count
-        best: ImageMatch | None = None
-        for y in range(y0, y1 - template_height + 1):
-            for x in range(x0, x1 - template_width + 1):
-                error = 0
-                for ty in sample_y:
-                    for tx in sample_x:
-                        source_pixel, template_pixel = source_pixels[x + tx, y + ty], template_pixels[tx, ty]
-                        error += abs(source_pixel[0] - template_pixel[0]) + abs(source_pixel[1] - template_pixel[1]) + abs(source_pixel[2] - template_pixel[2])
-                        if error > allowed: break
-                    if error > allowed: break
-                score = 1 - error / (255 * sample_count)
-                if error <= allowed and (best is None or score > best.confidence): best = ImageMatch(x, y, template_width, template_height, score)
-        return best
+        return ScreenFrame(image).find_image(template, confidence=confidence, region=region)
 
-    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None) -> ImageMatch | None:
-        """在当前截图中匹配本机模板。
+    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
+        """在当前截图中匹配一个本机模板。"""
+        return self.capture_frame().find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
 
-        ``confidence`` 范围 ``(0, 1]``；``region`` 为比例区域
-        ``(left, top, right, bottom)``；未命中返回 ``None``。
-        """
-        return self._image_match(self.screenshot(), template, confidence=confidence, region=region)
+    def find_images(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> dict[str, ImageMatch | None]:
+        """在一张截图中匹配多个模板。"""
+        return self.capture_frame().find_images(dict(templates), confidence=confidence, regions=dict(regions or {}), regions_pixels=dict(regions_pixels or {}))
+
+    def find_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> tuple[str, ImageMatch] | None:
+        """在一张截图中寻找任意模板，返回第一个命中的名称和结果。"""
+        for name, match in self.find_images(templates, confidence=confidence, regions=regions, regions_pixels=regions_pixels).items():
+            if match is not None:
+                return name, match
+        return None
 
     def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
-        """等待本机模板出现并返回 ``ImageMatch``。
-
-        ``timeout``、``interval`` 单位秒；默认先等待一个 ``interval``；
-        ``initial_delay=False`` 立即探测；``log=True`` 输出每轮状态。
-        """
+        """等待本机模板出现并返回 ``ImageMatch``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
@@ -374,11 +367,20 @@ class AScriptClient:
             if time.monotonic() >= deadline: raise TimeoutError("image did not appear before timeout")
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
-        """等待模板消失，成功返回 ``True``，超时返回 ``False``。
+    def wait_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None, initial_delay: bool = True) -> tuple[str, ImageMatch]:
+        """等待任意模板出现；每轮只抓取并解码一张截图。"""
+        if not templates: raise ValueError("templates must not be empty")
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        deadline = time.monotonic() + timeout
+        if initial_delay: time.sleep(min(interval, timeout))
+        while True:
+            result = self.find_any_image(templates, confidence=confidence, regions=regions, regions_pixels=regions_pixels)
+            if result is not None: return result
+            if time.monotonic() >= deadline: raise TimeoutError(f"none of the images appeared before timeout: {', '.join(templates)}")
+            time.sleep(min(interval, deadline - time.monotonic()))
 
-        参数单位和 ``wait_image`` 相同。
-        """
+    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
+        """等待模板消失，成功返回 ``True``，超时返回 ``False``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
@@ -435,7 +437,18 @@ class AScriptClient:
         data = self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
         if not isinstance(data, Mapping):
             raise DeviceResponseError("invalid UI tree returned by device", body=repr(data))
-        return self._scale_tree_coordinates(dict(data), action["width"] / logical["width"], action["height"] / logical["height"], action)
+        config = data.get("config") if isinstance(data.get("config"), Mapping) else {}
+        scale = config.get("scale")
+        try:
+            protocol_scale = float(scale)
+        except (TypeError, ValueError):
+            protocol_scale = 0.0
+        derived_x, derived_y = action["width"] / logical["width"], action["height"] / logical["height"]
+        if protocol_scale > 0 and math.isclose(protocol_scale, derived_x, rel_tol=0.01) and math.isclose(protocol_scale, derived_y, rel_tol=0.01):
+            x_scale = y_scale = protocol_scale
+        else:
+            x_scale, y_scale = derived_x, derived_y
+        return self._scale_tree_coordinates(dict(data), x_scale, y_scale, action)
 
     def find_elements(self, selector: Mapping[str, Any], *, mode: str = "smart", x: float = 0, y: float = 0) -> list[dict[str, Any]]:
         """Resolve an AScript selector and return its matching element metadata.

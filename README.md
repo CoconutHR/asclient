@@ -52,6 +52,11 @@ device(text="登录").click()             # 确认无误后再点击
 | 按屏幕比例点击（底部中央） | `device.click_rel(0.5, 0.92)` |
 | 按屏幕比例滑动 | `client.swipe_relative(0.5, 0.8, 0.5, 0.2)` |
 | 识别屏幕文字 | `client.ocr()` |
+| 读取一个像素的 RGB/HEX | `client.pixel(100, 200).rgb` / `.hex` |
+| 按比例读取像素颜色 | `client.pixel_relative(0.5, 0.92)` |
+| 一帧中找多个模板 | `client.find_images({"成功": "success.png", "失败": "failure.png"})` |
+| 等待任意页面结果 | `name, match = client.wait_any_image({...}, timeout=20)` |
+| 本地快照关系查询 | `device.snapshot()(name="表单").child(device.selector().text("提交"))` |
 | 读取控件树 XML 字符串 | `device.dump_hierarchy()` |
 | 每步自动留证据的可靠执行 | `run.step("登录", login.click, capture_after=True)` |
 | 等待日志出现标记 | `client.wait_for_log("READY", timeout=10)` |

@@ -86,6 +86,12 @@ class ClientTests(unittest.TestCase):
         crop = self.client.crop_png_relative(source, 0.25, 0.25, 0.75, 0.75)
         self.assertEqual(self.client._png_size(crop), (2.0, 2.0))
         self.assertIn(bytes((1, 1, 0, 255)), zlib.decompress(crop[crop.index(b"IDAT") + 4:-12]))
+        original = self.client.screenshot
+        self.client.screenshot = lambda: source
+        try:
+            self.assertEqual(self.client._png_size(self.client.screenshot_crop(1, 1, 3, 3)), (2.0, 2.0))
+        finally:
+            self.client.screenshot = original
         with self.assertRaises(ValueError): self.client.crop_png_relative(source, 0.8, 0.1, 0.2, 0.9)
 
     def test_image_matching_honors_confidence_and_region(self):
@@ -495,6 +501,103 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(saved.read_bytes(), image)
             finally:
                 server.shutdown(); server.server_close()
+
+    def test_frame_pixel_colors_and_relative_coordinates_share_one_screenshot(self):
+        from io import BytesIO
+        from PIL import Image
+        image = Image.new("RGBA", (4, 3), (0, 0, 0, 255)); image.putpixel((1, 1), (12, 34, 56, 78))
+        output = BytesIO(); image.save(output, "PNG")
+        original = self.client.screenshot; calls = []
+        self.client.screenshot = lambda: calls.append(1) or output.getvalue()
+        try:
+            frame = self.client.capture_frame()
+            color = frame.pixel(1, 1)
+            self.assertEqual(color.rgb, (12, 34, 56))
+            self.assertEqual(color.rgba, (12, 34, 56, 78))
+            self.assertEqual(color.hex, "#0C2238")
+            self.assertEqual(frame.pixel_relative(0.25, 1 / 3).rgb, (12, 34, 56))
+            self.assertEqual(self.client.pixels([(1, 1), (0, 0)])[0].hex, "#0C2238")
+        finally:
+            self.client.screenshot = original
+        self.assertEqual(len(calls), 2)
+
+    def test_multi_template_matching_uses_one_frame_and_each_region(self):
+        from io import BytesIO
+        from PIL import Image
+        image = Image.new("RGB", (16, 12), "black")
+        red = Image.new("RGB", (2, 2), "red"); blue = Image.new("RGB", (2, 2), "blue")
+        image.paste(red, (2, 3)); image.paste(blue, (11, 7))
+        source, red_data, blue_data = BytesIO(), BytesIO(), BytesIO()
+        image.save(source, "PNG"); red.save(red_data, "PNG"); blue.save(blue_data, "PNG")
+        original = self.client.screenshot; calls = []
+        self.client.screenshot = lambda: calls.append(1) or source.getvalue()
+        try:
+            matches = self.client.find_images({"red": red_data.getvalue(), "blue": blue_data.getvalue()}, confidence=1, regions={"red": (0, 0, .5, .7), "blue": (.5, .5, 1, 1)})
+            self.assertEqual((matches["red"].x, matches["red"].y), (2, 3))
+            self.assertEqual((matches["blue"].x, matches["blue"].y), (11, 7))
+            self.assertEqual(self.client.find_any_image({"blue": blue_data.getvalue(), "red": red_data.getvalue()}, confidence=1)[0], "blue")
+        finally:
+            self.client.screenshot = original
+        self.assertEqual(len(calls), 2)
+
+    def test_tree_uses_protocol_scale_for_retina_coordinates(self):
+        original_json, original_screenshot = self.client.json, self.client.screenshot
+        def fake_json(method, path, **kwargs):
+            if path == "/api/screen/size": return {"code": 1, "data": {"width": 393, "height": 852}}
+            if path == "/api/tool/view/dump": return {"code": 1, "data": {"config": {"scale": 3, "display": {"widthPixels": 393, "heightPixels": 852}}, "views": [{"name": "button", "x": 20, "y": 63, "width": 353, "height": 36, "rect": {"left": 20, "top": 63, "right": 373, "bottom": 99}, "childs": []}]}}
+            return original_json(method, path, **kwargs)
+        try:
+            self.client.json = fake_json
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1179).to_bytes(4, "big") + (2556).to_bytes(4, "big")
+            tree = self.client.ui_tree(x=300, y=600)
+        finally:
+            self.client.json, self.client.screenshot = original_json, original_screenshot
+        node = tree["views"][0]
+        self.assertEqual((node["x"], node["y"], node["width"], node["height"]), (60.0, 189.0, 1059.0, 108.0))
+        self.assertEqual((node["rect"]["left"], node["rect"]["right"]), (60.0, 1119.0))
+
+    def test_ui_snapshot_queries_relationships_without_extra_requests(self):
+        original = self.client.ui_tree; calls = []
+        self.client.ui_tree = lambda **kwargs: calls.append(kwargs) or {"views": [{"name": "root", "childs": [{"name": "left", "label": "A", "childs": [{"name": "deep", "childs": []}]}, {"name": "right", "label": "B", "childs": []}]}]}
+        try:
+            device = Device(self.client); snapshot = device.snapshot()
+            left = snapshot(name="left")
+            self.assertEqual(left.child(device.selector().name("deep")).count, 1)
+            self.assertEqual(left.descendant(device.selector().name("deep")).count, 1)
+            self.assertEqual(left.sibling(device.selector().name("right")).count, 1)
+            self.assertEqual(left.parent(device.selector().name("root")).count, 1)
+            self.assertEqual(device(name="left").snapshot().count, 1)
+        finally:
+            self.client.ui_tree = original
+        self.assertEqual(len(calls), 2)
+
+    def test_template_path_cache_reloads_when_file_changes(self):
+        from io import BytesIO
+        from PIL import Image
+        screen = Image.new("RGB", (8, 8), "black"); screen.paste(Image.new("RGB", (2, 2), "red"), (3, 3))
+        screen_data = BytesIO(); screen.save(screen_data, "PNG")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "template.png"
+            Image.new("RGB", (2, 2), "red").save(path)
+            from asclient import ScreenFrame
+            image = ScreenFrame(screen_data.getvalue())
+            self.assertIsNotNone(image.find_image(path, confidence=1))
+            Image.new("RGB", (2, 2), "blue").save(path)
+            self.assertIsNone(image.find_image(path, confidence=1))
+
+    def test_wait_any_image_returns_matching_name(self):
+        from io import BytesIO
+        from PIL import Image
+        source = Image.new("RGB", (8, 8), "black"); source.paste(Image.new("RGB", (2, 2), "green"), (4, 4))
+        source_data, green_data, red_data = BytesIO(), BytesIO(), BytesIO()
+        source.save(source_data, "PNG"); Image.new("RGB", (2, 2), "green").save(green_data, "PNG"); Image.new("RGB", (2, 2), "red").save(red_data, "PNG")
+        original = self.client.screenshot; self.client.screenshot = lambda: source_data.getvalue()
+        try:
+            name, match = self.client.wait_any_image({"missing": red_data.getvalue(), "found": green_data.getvalue()}, confidence=1, timeout=0, initial_delay=False)
+        finally:
+            self.client.screenshot = original
+        self.assertEqual(name, "found")
+        self.assertEqual((match.x, match.y), (4, 4))
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve

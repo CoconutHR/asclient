@@ -1,7 +1,8 @@
 """Dependency-free client for AScript's local iOS device service."""
 
 from .client import AScriptClient, DeviceAddress, ImageMatch, LogEntry
-from .automation import Device, Selector, UiCollection, UiObject
+from .automation import Device, Selector, UiCollection, UiObject, UiSnapshot, SnapshotNode, SnapshotCollection
+from .vision import PixelColor, ScreenFrame
 from .run import Run
 from .tunnel import AScriptTunnel, IProxyTunnel
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, IProxyNotFoundError, TunnelError
@@ -11,4 +12,4 @@ def connect(address: str, *, password: str = "", timeout: float = 15.0, retries:
     """Connect to an AScript device using a uiautomator2-like entry point."""
     return Device(AScriptClient(address, password=password, timeout=timeout, retries=retries))
 
-__all__ = ["AScriptClient", "DeviceAddress", "ImageMatch", "LogEntry", "Device", "Selector", "UiCollection", "UiObject", "Run", "AScriptTunnel", "IProxyTunnel", "connect", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError", "TunnelError", "IProxyNotFoundError"]
+__all__ = ["AScriptClient", "DeviceAddress", "ImageMatch", "LogEntry", "PixelColor", "ScreenFrame", "Device", "Selector", "UiCollection", "UiObject", "UiSnapshot", "SnapshotNode", "SnapshotCollection", "Run", "AScriptTunnel", "IProxyTunnel", "connect", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError", "TunnelError", "IProxyNotFoundError"]

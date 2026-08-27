@@ -1,0 +1,125 @@
+"""Local screenshot, color, and template-matching primitives."""
+from __future__ import annotations
+
+import math
+from collections import OrderedDict
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:
+    from .client import ImageMatch
+
+_TEMPLATE_CACHE: OrderedDict[tuple[str, int, int], object] = OrderedDict()
+_TEMPLATE_CACHE_LIMIT = 32
+
+
+@dataclass(frozen=True)
+class PixelColor:
+    """RGBA color sampled from a physical screenshot pixel."""
+    r: int
+    g: int
+    b: int
+    a: int = 255
+    @property
+    def rgb(self) -> tuple[int, int, int]: return self.r, self.g, self.b
+    @property
+    def rgba(self) -> tuple[int, int, int, int]: return self.r, self.g, self.b, self.a
+    @property
+    def hex(self) -> str: return f"#{self.r:02X}{self.g:02X}{self.b:02X}"
+
+
+def relative_point(width: int, height: int, x_ratio: float, y_ratio: float) -> tuple[int, int]:
+    try: x_ratio, y_ratio = float(x_ratio), float(y_ratio)
+    except (TypeError, ValueError) as exc: raise ValueError("relative coordinates must be finite numbers between 0 and 1") from exc
+    if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x_ratio, y_ratio)):
+        raise ValueError("relative coordinates must be finite numbers between 0 and 1")
+    return min(width - 1, int(width * x_ratio)), min(height - 1, int(height * y_ratio))
+
+
+class ScreenFrame:
+    """One immutable device screenshot using physical-pixel coordinates."""
+    def __init__(self, png: bytes):
+        try: from PIL import Image
+        except ImportError as exc: raise RuntimeError("vision features require Pillow; reinstall asclient to install its dependencies") from exc
+        self.png = bytes(png)
+        with Image.open(BytesIO(self.png)) as source: self._image = source.convert("RGBA")
+        self.width, self.height = self._image.size
+        self._rgb = None
+
+    @property
+    def size(self) -> dict[str, float]: return {"width": float(self.width), "height": float(self.height)}
+    def point_relative(self, x_ratio: float, y_ratio: float) -> tuple[int, int]: return relative_point(self.width, self.height, x_ratio, y_ratio)
+    def pixel(self, x: int, y: int) -> PixelColor:
+        if not isinstance(x, int) or not isinstance(y, int) or not (0 <= x < self.width and 0 <= y < self.height):
+            raise ValueError(f"pixel coordinates must be within 0..{self.width - 1}, 0..{self.height - 1}")
+        return PixelColor(*self._image.getpixel((x, y)))
+    def pixel_relative(self, x_ratio: float, y_ratio: float) -> PixelColor: return self.pixel(*self.point_relative(x_ratio, y_ratio))
+    def pixels(self, points: Iterable[tuple[int, int]]) -> list[PixelColor]: return [self.pixel(x, y) for x, y in points]
+    def pixels_relative(self, points: Iterable[tuple[float, float]]) -> list[PixelColor]: return [self.pixel_relative(x, y) for x, y in points]
+
+    def crop_pixels(self, left: int, top: int, right: int, bottom: int) -> bytes:
+        if not all(isinstance(value, int) for value in (left, top, right, bottom)) or not (0 <= left < right <= self.width and 0 <= top < bottom <= self.height):
+            raise ValueError("crop pixels must satisfy screen bounds and left < right, top < bottom")
+        output = BytesIO(); self._image.crop((left, top, right, bottom)).save(output, "PNG")
+        return output.getvalue()
+
+    def crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
+        x0, y0, x1, y1 = self._region((left, top, right, bottom), None)
+        return self.crop_pixels(x0, y0, x1, y1)
+
+    def _region(self, region: tuple[float, float, float, float] | None, region_pixels: tuple[int, int, int, int] | None) -> tuple[int, int, int, int]:
+        if region is not None and region_pixels is not None: raise ValueError("region and region_pixels cannot be combined")
+        if region_pixels is not None:
+            left, top, right, bottom = region_pixels
+            if not all(isinstance(value, int) for value in region_pixels) or not (0 <= left < right <= self.width and 0 <= top < bottom <= self.height):
+                raise ValueError("region_pixels must satisfy screen bounds and left < right, top < bottom")
+            return region_pixels
+        if region is None: return 0, 0, self.width, self.height
+        try: left, top, right, bottom = (float(value) for value in region)
+        except (TypeError, ValueError) as exc: raise ValueError("region must contain four ratios") from exc
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
+            raise ValueError("region must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+        return int(self.width * left), int(self.height * top), min(self.width, int(self.width * right)), min(self.height, int(self.height * bottom))
+
+    @staticmethod
+    def _template(template: str | Path | bytes):
+        try: from PIL import Image
+        except ImportError as exc: raise RuntimeError("image matching requires Pillow; reinstall asclient to install its dependencies") from exc
+        if isinstance(template, bytes):
+            with Image.open(BytesIO(template)) as source: return source.convert("RGB")
+        path = Path(template).resolve(); stat = path.stat(); key = (str(path), stat.st_mtime_ns, stat.st_size)
+        cached = _TEMPLATE_CACHE.get(key)
+        if cached is not None:
+            _TEMPLATE_CACHE.move_to_end(key); return cached.copy()
+        with Image.open(path) as source: decoded = source.convert("RGB")
+        _TEMPLATE_CACHE[key] = decoded.copy()
+        while len(_TEMPLATE_CACHE) > _TEMPLATE_CACHE_LIMIT: _TEMPLATE_CACHE.popitem(last=False)
+        return decoded
+
+    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> "ImageMatch | None":
+        from .client import ImageMatch
+        if not math.isfinite(confidence) or not 0 < confidence <= 1: raise ValueError("confidence must be a finite number in (0, 1]")
+        needle = self._template(template)
+        if self._rgb is None: self._rgb = self._image.convert("RGB")
+        haystack = self._rgb; template_width, template_height = needle.size; x0, y0, x1, y1 = self._region(region, region_pixels)
+        if template_width > x1 - x0 or template_height > y1 - y0: return None
+        source_pixels, template_pixels = haystack.load(), needle.load()
+        sample_x = sorted({round(index * (template_width - 1) / 7) for index in range(8)}); sample_y = sorted({round(index * (template_height - 1) / 7) for index in range(8)})
+        sample_count = len(sample_x) * len(sample_y) * 3; allowed = (1 - confidence) * 255 * sample_count; best = None
+        for y in range(y0, y1 - template_height + 1):
+            for x in range(x0, x1 - template_width + 1):
+                error = 0
+                for ty in sample_y:
+                    for tx in sample_x:
+                        one, two = source_pixels[x + tx, y + ty], template_pixels[tx, ty]
+                        error += abs(one[0] - two[0]) + abs(one[1] - two[1]) + abs(one[2] - two[2])
+                        if error > allowed: break
+                    if error > allowed: break
+                score = 1 - error / (255 * sample_count)
+                if error <= allowed and (best is None or score > best.confidence): best = ImageMatch(x, y, template_width, template_height, score)
+        return best
+
+    def find_images(self, templates: dict[str, str | Path | bytes], *, confidence: float = 0.9, regions: dict[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: dict[str, tuple[int, int, int, int] | None] | None = None) -> dict[str, "ImageMatch | None"]:
+        return {name: self.find_image(template, confidence=confidence, region=(regions or {}).get(name), region_pixels=(regions_pixels or {}).get(name)) for name, template in templates.items()}
