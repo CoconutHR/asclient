@@ -204,7 +204,7 @@ ocr_result = client.ocr()
 
 图标无法暴露控件树时，可使用本机模板等待：`wait_image(template, confidence=0.95, timeout=15)`，返回实际像素坐标的匹配结果；`wait_image_gone()` 用于等待加载图标消失，`tap_image()` 则等待后点击中心点。置信度必须在 `(0, 1]`，越高越严格。模板应从同一分辨率、方向和 UI 缩放状态的真机截图中截取，并优先用 `region=(left, top, right, bottom)` 限制搜索区域以降低误匹配和轮询时间。
 
-长列表中可使用 `scroll_until_image(template, confidence=0.95, max_swipes=8)`。它会先检查当前页面，再从下向上滑动并重试；找到后返回匹配结果但不自动点击。必须同时设置业务上合理的 `timeout` 和 `max_swipes`，避免页面滚动到末尾后无限重试。
+长列表中可使用 `scroll_until_image(template, confidence=0.95, max_swipes=8, log=True)`。它会先检查当前页面，再从下向上滑动并重试；找到后返回匹配结果但不自动点击。`log=True` 会在本机终端输出每次匹配与滚动决策，便于排查模板或阈值问题。必须同时设置业务上合理的 `timeout` 和 `max_swipes`，避免页面滚动到末尾后无限重试。
 
 ## 6. Inspector 工作流
 

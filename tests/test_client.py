@@ -115,6 +115,18 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(swipes), 2)
         self.assertEqual(swipes[0][0], (0.5, 0.8, 0.5, 0.2))
 
+    def test_scroll_until_image_can_print_each_match_attempt(self):
+        original_find, original_relative = self.client.find_image, self.client.relative_point
+        output = StringIO()
+        try:
+            self.client.find_image = lambda *args, **kwargs: None
+            self.client.relative_point = lambda *args: (1, 1)
+            with redirect_stdout(output):
+                with self.assertRaises(TimeoutError): self.client.scroll_until_image(b"template", max_swipes=0, log=True)
+        finally:
+            self.client.find_image, self.client.relative_point = original_find, original_relative
+        self.assertIn("attempt 1", output.getvalue())
+
     def test_upload_builds_multipart_and_safe_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "main.py"; source.write_text("print(1)", encoding="utf-8")

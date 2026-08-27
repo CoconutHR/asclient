@@ -540,7 +540,7 @@ class AScriptClient:
         """Swipe between two points expressed as fractions of current screen dimensions."""
         return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, x_ratio: float = 0.5, start_y_ratio: float = 0.8, end_y_ratio: float = 0.2, duration_ms: int = 300) -> ImageMatch:
+    def scroll_until_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, x_ratio: float = 0.5, start_y_ratio: float = 0.8, end_y_ratio: float = 0.2, duration_ms: int = 300, log: bool = False) -> ImageMatch:
         """Scroll upward until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
@@ -548,8 +548,14 @@ class AScriptClient:
         deadline = time.monotonic() + timeout
         for swipe_number in range(max_swipes + 1):
             match = self.find_image(template, confidence=confidence, region=region)
-            if match is not None: return match
-            if swipe_number == max_swipes or time.monotonic() >= deadline: break
+            attempt = swipe_number + 1
+            if match is not None:
+                if log: print(t("image_scroll_match", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))
+                return match
+            if swipe_number == max_swipes or time.monotonic() >= deadline:
+                if log: print(t("image_scroll_stop", attempt=attempt))
+                break
+            if log: print(t("image_scroll_next", attempt=attempt))
             self.swipe_relative(x_ratio, start_y_ratio, x_ratio, end_y_ratio, duration_ms=duration_ms)
             time.sleep(min(interval, max(0, deadline - time.monotonic())))
         raise TimeoutError(f"image did not appear after {max_swipes} upward swipes or before timeout")
