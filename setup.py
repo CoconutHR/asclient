@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="asclient",
-    version="0.7.2",
+    version="0.7.3",
     description="AScript local iOS device client",
     python_requires=">=3.10",
     install_requires=["Pillow>=9.0"],

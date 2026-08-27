@@ -93,9 +93,9 @@ py -m asclient shot artifacts\bottom.png --crop-rel 0 0.5 1 1
 本机模板可等待图标出现/消失，也可指定置信度：
 
 ```python
-match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15)
+match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, log=True)
 device.tap(*match.center)
-device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
+device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=True)
 
 # 每次向上滑动后重试，直到图标出现。
 match = device.scroll_until_image("assets/target.png", confidence=0.95, max_swipes=8, log=True)

@@ -84,9 +84,9 @@ class Run:
             record["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self._write_manifest()
 
-    def wait(self, selector: "Selector", *, timeout: float = 10.0, name: str = "wait") -> "UiObject":
+    def wait(self, selector: "Selector", *, timeout: float = 10.0, name: str = "wait", log: bool = False) -> "UiObject":
         if not hasattr(self.device, "wait"): raise TypeError("wait requires a Device, not AScriptClient")
-        return self.step(name, lambda: self.device.wait(selector, timeout=timeout))
+        return self.step(name, lambda: self.device.wait(selector, timeout=timeout, log=log))
 
     def assert_unique(self, selector: "Selector", *, name: str = "assert_unique") -> "UiObject":
         if not callable(getattr(self.device, "find_all", None)): raise TypeError("assert_unique requires a Device, not AScriptClient")

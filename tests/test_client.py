@@ -127,6 +127,28 @@ class ClientTests(unittest.TestCase):
             self.client.find_image, self.client.relative_point = original_find, original_relative
         self.assertIn("attempt 1", output.getvalue())
 
+    def test_image_wait_can_print_each_attempt(self):
+        original_find = self.client.find_image
+        output = StringIO()
+        try:
+            self.client.find_image = lambda *args, **kwargs: None
+            with redirect_stdout(output):
+                with self.assertRaises(TimeoutError): self.client.wait_image(b"template", timeout=0, log=True)
+        finally:
+            self.client.find_image = original_find
+        self.assertIn("attempt 1", output.getvalue())
+
+    def test_selector_wait_can_print_each_attempt(self):
+        device = Device(self.client)
+        original_find_all = device.find_all
+        output = StringIO()
+        try:
+            device.find_all = lambda selector: []
+            with redirect_stdout(output): self.assertIsNone(device.find(device.selector().name("missing"), timeout=0, log=True))
+        finally:
+            device.find_all = original_find_all
+        self.assertIn("attempt 1", output.getvalue())
+
     def test_upload_builds_multipart_and_safe_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "main.py"; source.write_text("print(1)", encoding="utf-8")

@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.7.2`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.3`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -199,9 +199,9 @@ match = client.find_image("assets/login-icon.png", confidence=0.95)
 if match:
     print(match.center)
 
-match = client.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, interval=0.5)
+match = client.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, interval=0.5, log=True)
 client.tap(*match.center)
-client.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
+client.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=True)
 
 # 等待后自动点击模板中心。
 client.tap_image("assets/continue.png", confidence=0.93, timeout=10)
@@ -219,7 +219,7 @@ target = client.scroll_until_image(
 client.tap(*target.center)
 ```
 
-模板匹配依赖 Pillow，随 `asclient` 一起安装。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
+模板匹配依赖 Pillow，随 `asclient` 一起安装。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
 
 ### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
 
@@ -370,7 +370,7 @@ cancel = base.name("cancel_button")
 | `.info` | 首个元素 `info`；无匹配时抛 `LookupError` |
 | `.all()` | `list[UiObject]` |
 | `.get(timeout=0)` | 首个元素或 `None` |
-| `.wait_gone(timeout=10)` | 元素消失前轮询；成功返回 `True`，超时返回 `False` |
+| `.wait_gone(timeout=10, log=False)` | 元素消失前轮询；成功返回 `True`，超时返回 `False`；`log=True` 输出每轮状态 |
 | `.click()` | 点击首个元素中心；无匹配时抛 `LookupError` |
 | `.click_exists(timeout=0)` | 找到即点击并返回 `True`；未找到返回 `False` |
 | `.set_text(text, interval_ms=120)` | 点击首个元素后输入文本 |

@@ -372,22 +372,33 @@ class AScriptClient:
         """Find a local image template in the current screenshot."""
         return self._image_match(self.screenshot(), template, confidence=confidence, region=region)
 
-    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None) -> ImageMatch:
+    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False) -> ImageMatch:
         """Wait until a local image template appears, then return its match."""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
+        attempt = 0
         while True:
+            attempt += 1
             match = self.find_image(template, confidence=confidence, region=region)
-            if match is not None: return match
+            if match is not None:
+                if log: print(t("image_wait_found", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))
+                return match
+            if log: print(t("image_wait_missing", attempt=attempt))
             if time.monotonic() >= deadline: raise TimeoutError("image did not appear before timeout")
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None) -> bool:
+    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False) -> bool:
         """Wait until a local image template is no longer present."""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
+        attempt = 0
         while True:
-            if self.find_image(template, confidence=confidence, region=region) is None: return True
+            attempt += 1
+            match = self.find_image(template, confidence=confidence, region=region)
+            if match is None:
+                if log: print(t("image_wait_gone", attempt=attempt))
+                return True
+            if log: print(t("image_wait_present", attempt=attempt, confidence=match.confidence))
             if time.monotonic() >= deadline: return False
             time.sleep(min(interval, deadline - time.monotonic()))
 

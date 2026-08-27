@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, TYPE_CHECKING
 
+from .i18n import t
+
 if TYPE_CHECKING:
     from .client import AScriptClient
 
@@ -132,16 +134,16 @@ class Device:
             raise ValueError("invalid element list returned by device")
         return [UiObject(self, dict(item), selector) for item in views if isinstance(item, Mapping)]
 
-    def find(self, selector: Selector, *, timeout: float = 0) -> UiObject | None:
-        return UiCollection(self, selector).get(timeout=timeout)
+    def find(self, selector: Selector, *, timeout: float = 0, log: bool = False) -> UiObject | None:
+        return UiCollection(self, selector).get(timeout=timeout, log=log)
 
-    def wait(self, selector: Selector, *, timeout: float = 10.0) -> UiObject:
-        result = self.find(selector, timeout=timeout)
+    def wait(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> UiObject:
+        result = self.find(selector, timeout=timeout, log=log)
         if result is None: raise LookupError(f"element did not appear within {timeout}s: {selector.code()}")
         return result
 
-    def wait_gone(self, selector: Selector, *, timeout: float = 10.0) -> bool:
-        return UiCollection(self, selector).wait_gone(timeout=timeout)
+    def wait_gone(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> bool:
+        return UiCollection(self, selector).wait_gone(timeout=timeout, log=log)
 
     def dump_hierarchy(self, *, mode: str = "smart") -> str:
         return self.client.ui_xml(mode=mode)
@@ -165,6 +167,22 @@ class Device:
         """Scroll upward until a local image template appears."""
         return self.client.scroll_until_image(template, **kwargs)
 
+    def find_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
+        """Find a local image template in the current screenshot."""
+        return self.client.find_image(template, **kwargs)
+
+    def wait_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
+        """Wait until a local image template appears."""
+        return self.client.wait_image(template, **kwargs)
+
+    def wait_image_gone(self, template: str | Path | bytes, **kwargs: Any) -> bool:
+        """Wait until a local image template disappears."""
+        return self.client.wait_image_gone(template, **kwargs)
+
+    def tap_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
+        """Wait for a local image template and tap its center."""
+        return self.client.tap_image(template, **kwargs)
+
 
 @dataclass
 class UiCollection:
@@ -182,19 +200,29 @@ class UiCollection:
         return item.info
 
     def all(self) -> list[UiObject]: return self.device.find_all(self.selector)
-    def get(self, *, timeout: float = 0) -> UiObject | None:
+    def get(self, *, timeout: float = 0, log: bool = False) -> UiObject | None:
         deadline = time.monotonic() + timeout
+        attempt = 0
         while True:
+            attempt += 1
             found = self.all()
-            if found: return found[0]
+            if found:
+                if log: print(t("selector_wait_found", attempt=attempt, selector=self.selector.code()))
+                return found[0]
+            if log: print(t("selector_wait_missing", attempt=attempt, selector=self.selector.code()))
             if time.monotonic() >= deadline: return None
             time.sleep(min(0.3, deadline - time.monotonic()))
-    def wait_gone(self, *, timeout: float = 10.0) -> bool:
+    def wait_gone(self, *, timeout: float = 10.0, log: bool = False) -> bool:
         deadline = time.monotonic() + timeout
-        while self.exists:
+        attempt = 0
+        while True:
+            attempt += 1
+            if not self.exists:
+                if log: print(t("selector_wait_gone", attempt=attempt, selector=self.selector.code()))
+                return True
+            if log: print(t("selector_wait_present", attempt=attempt, selector=self.selector.code()))
             if time.monotonic() >= deadline: return False
             time.sleep(min(0.3, deadline - time.monotonic()))
-        return True
     def click(self) -> Any:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
