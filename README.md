@@ -125,6 +125,8 @@ with Run(device) as run:
 
 `py -m asclient inspect` 会启动仅监听本机回环地址的浏览器 Inspector，展示当前截图、控件树、前台 App、控件属性、可复制选择器和真机坐标。拖动三栏分隔线不会影响截图比例或点击坐标映射。
 
+顶部的 `Crop save` 可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。
+
 部分 App 或页面不暴露无障碍控件树，此时 Inspector 会正确显示没有语义节点。仍可单独使用截图、OCR、图色与坐标操作；不要假设所有页面都能使用语义选择器。
 
 真机冒烟测试使用独立配置文件，避免环境变量和误操作：

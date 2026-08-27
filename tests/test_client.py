@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
 from asclient.cli import _stop_tunnel_on_sigterm, main
@@ -426,6 +426,21 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(json.loads(response.read())["count"], 1)
         finally:
             server.shutdown(); server.server_close()
+
+    def test_inspector_saves_browser_crop_only_in_configured_directory(self):
+        from asclient.inspector import serve
+        image = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (2).to_bytes(4, "big") + (3).to_bytes(4, "big")
+        with tempfile.TemporaryDirectory() as directory:
+            server = serve(self.client, open_browser=False, output_dir=directory)
+            thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+            try:
+                request = Request(f"http://127.0.0.1:{server.server_port}/api/crop", data=json.dumps({"image": base64.b64encode(image).decode()}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+                with urlopen(request, timeout=2) as response: result = json.loads(response.read())
+                saved = Path(result["path"])
+                self.assertEqual(saved.parent, Path(directory).resolve())
+                self.assertEqual(saved.read_bytes(), image)
+            finally:
+                server.shutdown(); server.server_close()
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve

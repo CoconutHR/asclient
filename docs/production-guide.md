@@ -227,6 +227,7 @@ py -m asclient inspect
 3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
 5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示物理像素 `Action coordinate`，可直接用于 `tap`/`swipe`；面板缩放不会改变该数值。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
+6. 需要取得局部模板时，点击顶部 `Crop save`，在截图上拖拽矩形后松开。生成的 PNG 保持原始截图物理像素，会保存到启动 `py -m asclient inspect` 时的当前目录；终端目录路径即为保存位置。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 

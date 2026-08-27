@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.7.7`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.8`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -8,8 +8,8 @@
 | --- | --- |
 | UI 控件查询、点击和输入 | `connect()` / `Device` |
 | 截图、OCR、图色、项目文件、日志 | `AScriptClient` |
-| 交互式检查控件树 | `py -m asclient inspect` |
-| 诊断本机、USB 与设备服务 | `py -m asclient doctor` |
+| 交互式检查控件树 | `python -m asclient inspect` |
+| 诊断本机、USB 与设备服务 | `python -m asclient doctor` |
 | 临时调用已确认但未封装的设备端点 | `AScriptClient.request()` 或 CLI `api` |
 | 设备端执行 Python | `eval_python()` 或 CLI `eval`，仅限受信任代码 |
 
@@ -721,7 +721,7 @@ run_forever(client, host="127.0.0.1", port=0)
 | `serve(client, host="127.0.0.1", port=0, open_browser=True)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口 |
 | `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
 
-Inspector 只应绑定 `127.0.0.1`。它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。不需要、也不应作为局域网服务使用。
+Inspector 只应绑定 `127.0.0.1`。它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部 `Crop save` 按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
 
 CLI 启动时会打印实际 Inspector URL。浏览器在刷新或关闭页面时取消正在传输的快照属于正常情况，客户端会静默结束该响应，不会影响设备端状态或打印终端堆栈。
 
