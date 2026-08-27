@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.7.4`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.5`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -207,9 +207,11 @@ client.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=Tr
 client.tap_image("assets/continue.png", confidence=0.93, timeout=10)
 ```
 
+`wait_image()` 与 `wait_image_gone()` 默认先等待一个 `interval`，再进行第一次探测；传入 `initial_delay=False` 可改为立即探测，且首次等待时间仍计入总 `timeout`。
+
 ### `scroll_until_image()`
 
-每次匹配失败后沿指定方向滑动，直到模板出现。`direction` 支持 `down`（默认）、`up`、`left`、`right`，也兼容 `下`、`上`、`左`、`右`；其含义是手势移动方向。匹配会在第一次滑动前以及每次滑动后执行。`timeout` 是整个操作的最大时长，默认 20 秒；`max_swipes` 默认 10 次。两项上限任一先到即停止并抛出 `TimeoutError`。`duration_ms` 为每次滑动时长。`log=False` 默认不输出；设为 `True` 会在本机终端打印每次匹配结果、继续滑动或停止的原因。
+每次匹配失败后沿指定方向滑动，直到模板出现。`direction` 支持 `down`（默认）、`up`、`left`、`right`，也兼容 `下`、`上`、`左`、`右`；其含义是手势移动方向。默认先等待一个 `interval`，再进行首次匹配；传入 `initial_delay=False` 可立即开始。`timeout` 是整个操作的最大时长，默认 20 秒；`max_swipes` 默认 10 次。两项上限任一先到即停止并抛出 `TimeoutError`。`duration_ms` 为每次滑动时长。`log=False` 默认不输出；设为 `True` 会在本机终端打印每次匹配结果、继续滑动或停止的原因。
 
 ```python
 target = client.scroll_until_image(

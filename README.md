@@ -94,6 +94,8 @@ py -m asclient shot artifacts\bottom.png --crop-rel 0 0.5 1 1
 
 ```python
 match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, log=True)
+# 默认先等待一个 interval；需要立即探测时设 initial_delay=False。
+match = device.wait_image("assets/login-icon.png", interval=0.5, initial_delay=False)
 device.tap(*match.center)
 device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=True)
 
