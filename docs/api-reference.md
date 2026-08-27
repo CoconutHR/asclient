@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.6.6`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.6.7`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -177,6 +177,18 @@ for name, version in client.packages():
 png = client.screenshot()
 artifact = client.save_screenshot("artifacts/current.png")
 ```
+
+### `screenshot_crop_relative(left, top, right, bottom) -> bytes`
+
+抓取截图后按比例裁剪。四个参数均为 `0.0..1.0`，矩形为左上包含、右下排除；必须满足 `left < right`、`top < bottom`。`save_screenshot_crop_relative(destination, left, top, right, bottom)` 会直接保存裁剪结果并返回绝对路径。
+
+```python
+# 取得下半屏 PNG 字节或直接保存。
+bottom = client.screenshot_crop_relative(0, 0.5, 1, 1)
+client.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
+```
+
+实现无第三方依赖，支持移动端截图使用的非隔行 8 位 RGB/RGBA PNG；非标准 PNG 会抛出 `DeviceResponseError`。
 
 ### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
 
@@ -620,7 +632,7 @@ py -m asclient --yes remove smoke
 | `scan` | `scan` | 扫描默认地址所在 `/24` |
 | `pkgs` | `pkgs` | 列出设备 Python 包 |
 | `app` | `app` | 当前 App 信息 |
-| `shot` | `shot [output.png]` | 保存截图 |
+| `shot` | `shot [output.png] [--crop-rel LEFT TOP RIGHT BOTTOM]` | 保存截图，可按比例裁剪 |
 | `dump` | `dump [output.xml] [--mode MODE]` | 保存 XML 控件树 |
 | `observe` | `observe [--prefix PREFIX]` | 同时保存截图与 XML |
 | `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |

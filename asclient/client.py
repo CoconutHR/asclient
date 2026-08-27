@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Optional
@@ -249,6 +250,70 @@ class AScriptClient:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self.screenshot())
+        return destination.resolve()
+
+    @staticmethod
+    def crop_png_relative(image: bytes, left: float, top: float, right: float, bottom: float) -> bytes:
+        """Crop a standard screenshot PNG using a 0..1 relative rectangle."""
+        try:
+            left, top, right, bottom = (float(value) for value in (left, top, right, bottom))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("crop ratios must be finite numbers between 0 and 1") from exc
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
+            raise ValueError("crop ratios must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+        if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise DeviceResponseError("screenshot is not a PNG image")
+        offset, ihdr, compressed = 8, None, bytearray()
+        while offset + 12 <= len(image):
+            length = int.from_bytes(image[offset:offset + 4], "big")
+            kind, data = image[offset + 4:offset + 8], image[offset + 8:offset + 8 + length]
+            if len(data) != length: raise DeviceResponseError("truncated PNG image")
+            if kind == b"IHDR": ihdr = data
+            elif kind == b"IDAT": compressed.extend(data)
+            elif kind == b"IEND": break
+            offset += length + 12
+        if ihdr is None or len(ihdr) != 13:
+            raise DeviceResponseError("PNG image has no valid IHDR chunk")
+        width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", ihdr)
+        channels = {2: 3, 6: 4}.get(color_type)
+        if depth != 8 or channels is None or compression != 0 or filter_method != 0 or interlace != 0:
+            raise DeviceResponseError("only non-interlaced 8-bit RGB/RGBA PNG screenshots can be cropped")
+        stride, bpp = width * channels, channels
+        raw = zlib.decompress(compressed)
+        if len(raw) != height * (stride + 1): raise DeviceResponseError("PNG image data has an invalid length")
+        rows: list[bytearray] = []
+        previous = bytearray(stride)
+        for row_index in range(height):
+            start = row_index * (stride + 1); filter_type = raw[start]; row = bytearray(raw[start + 1:start + 1 + stride])
+            for index in range(stride):
+                a = row[index - bpp] if index >= bpp else 0; b = previous[index]; c = previous[index - bpp] if index >= bpp else 0
+                if filter_type == 1: row[index] = (row[index] + a) & 255
+                elif filter_type == 2: row[index] = (row[index] + b) & 255
+                elif filter_type == 3: row[index] = (row[index] + ((a + b) // 2)) & 255
+                elif filter_type == 4:
+                    p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                    row[index] = (row[index] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+                elif filter_type != 0: raise DeviceResponseError("PNG image uses an unsupported filter")
+            rows.append(row); previous = row
+        x0, x1 = int(width * left), max(int(width * right), int(width * left) + 1)
+        y0, y1 = int(height * top), max(int(height * bottom), int(height * top) + 1)
+        x1, y1 = min(x1, width), min(y1, height)
+        cropped_width, cropped_height = x1 - x0, y1 - y0
+        cropped = b"".join(b"\0" + bytes(row[x0 * channels:x1 * channels]) for row in rows[y0:y1])
+        header = struct.pack(">IIBBBBB", cropped_width, cropped_height, depth, color_type, compression, filter_method, interlace)
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(cropped)) + chunk(b"IEND", b"")
+
+    def screenshot_crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
+        """Capture and crop a screenshot with a relative ``left, top, right, bottom`` rectangle."""
+        return self.crop_png_relative(self.screenshot(), left, top, right, bottom)
+
+    def save_screenshot_crop_relative(self, destination: str | Path, left: float, top: float, right: float, bottom: float) -> Path:
+        """Capture a relative crop and save it as PNG."""
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(self.screenshot_crop_relative(left, top, right, bottom))
         return destination.resolve()
 
     def capture_artifacts(self, destination: str | Path, *, prefix: str = "failure", mode: str = "smart") -> dict[str, Path]:

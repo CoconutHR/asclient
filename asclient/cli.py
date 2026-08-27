@@ -156,7 +156,7 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--report", metavar="FILE", help="write a password-free JSON diagnostic report")
     for name in ("ping", "status", "scan", "ls", "stop", "home", "app", "pkgs"):
         commands.add_parser(name)
-    shot = commands.add_parser("shot"); shot.add_argument("output", nargs="?", default="screenshot.png")
+    shot = commands.add_parser("shot"); shot.add_argument("output", nargs="?", default="screenshot.png"); shot.add_argument("--crop-rel", nargs=4, type=float, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"))
     dump = commands.add_parser("dump"); dump.add_argument("output", nargs="?", default="dump.xml"); dump.add_argument("--mode", default="smart")
     observe = commands.add_parser("observe"); observe.add_argument("--prefix", default="observe")
     inspect = commands.add_parser("inspect", help="start the local browser UI inspector")
@@ -214,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "status": _out(client.status())
         elif cmd == "scan": _out([{"device": str(address), "platform": platform} for address, platform in client.scan_subnet()])
         elif cmd == "pkgs": _out(client.packages())
-        elif cmd == "shot": print(client.save_screenshot(args.output))
+        elif cmd == "shot": print(client.save_screenshot_crop_relative(args.output, *args.crop_rel) if args.crop_rel else client.save_screenshot(args.output))
         elif cmd == "dump": Path(args.output).write_text(client.ui_xml(mode=args.mode), encoding="utf-8"); print(Path(args.output).resolve())
         elif cmd == "observe":
             stamp = time.strftime("%Y%m%d_%H%M%S"); image, xml = Path(f"{args.prefix}_{stamp}.png"), Path(f"{args.prefix}_{stamp}.xml")

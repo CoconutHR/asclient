@@ -193,11 +193,14 @@ client.tap(200, 600)
 client.swipe(300, 700, 300, 250, duration_ms=350)
 client.tap_relative(0.5, 0.92)  # 宽度 50%、高度 92%，适合相对固定的底部区域
 client.swipe_relative(0.5, 0.8, 0.5, 0.2)
+client.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
 client.input_text("hello", interval_ms=120)
 ocr_result = client.ocr()
 ```
 
 客户端所有普通坐标 API 均统一为物理像素：`screen_size()`、控件树、XML、截图、OCR、`tap` 和 `swipe`。示例设备的截图/动作尺寸为 `1179 x 2556`。只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断而非定位使用。绝对点击使用 Inspector 的 `Action coordinate` 或 `screen_size()`；语义控件使用 `UiObject.click()`。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
+
+截图局部验收可使用 `save_screenshot_crop_relative(path, left, top, right, bottom)`；比例矩形必须满足 `0 <= left < right <= 1` 和 `0 <= top < bottom <= 1`。CLI 等价形式为 `shot FILE --crop-rel LEFT TOP RIGHT BOTTOM`。
 
 ## 6. Inspector 工作流
 

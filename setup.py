@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="asclient",
-    version="0.6.6",
+    version="0.6.7",
     description="Dependency-free AScript local iOS device client",
     python_requires=">=3.10",
     packages=["asclient"],

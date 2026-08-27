@@ -1,9 +1,11 @@
 import base64
 import json
 import socket
+import struct
 import tempfile
 import threading
 import unittest
+import zlib
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -70,6 +72,18 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(self.client.ping(), "iOS")
         self.assertEqual(self.client.screenshot(), b"PNG")
         self.assertEqual(self.client.ui_xml(), "<App/>")
+
+    def test_relative_screenshot_crop_preserves_requested_pixels(self):
+        def chunk(kind, data):
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+        pixels = [bytes((x, y, 0, 255)) for y in range(4) for x in range(4)]
+        raw = b"".join(b"\0" + b"".join(pixels[row * 4:(row + 1) * 4]) for row in range(4))
+        header = struct.pack(">IIBBBBB", 4, 4, 8, 6, 0, 0, 0)
+        source = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+        crop = self.client.crop_png_relative(source, 0.25, 0.25, 0.75, 0.75)
+        self.assertEqual(self.client._png_size(crop), (2.0, 2.0))
+        self.assertIn(bytes((1, 1, 0, 255)), zlib.decompress(crop[crop.index(b"IDAT") + 4:-12]))
+        with self.assertRaises(ValueError): self.client.crop_png_relative(source, 0.8, 0.1, 0.2, 0.9)
 
     def test_upload_builds_multipart_and_safe_path(self):
         with tempfile.TemporaryDirectory() as directory:
