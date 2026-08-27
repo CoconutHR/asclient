@@ -553,18 +553,34 @@ class AScriptClient:
         """Swipe between two points expressed as fractions of current screen dimensions."""
         return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
+        custom_swipe = (x1_ratio, y1_ratio, x2_ratio, y2_ratio)
+        if any(value is not None for value in custom_swipe) and not all(value is not None for value in custom_swipe):
+            raise ValueError("x1_ratio, y1_ratio, x2_ratio, and y2_ratio must be supplied together")
+        if swipe_relative is not None:
+            if any(value is not None for value in custom_swipe):
+                raise ValueError("swipe_relative cannot be combined with individual ratio parameters")
+            try:
+                if len(swipe_relative) != 4: raise ValueError
+                custom_swipe = tuple(float(value) for value in swipe_relative)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("swipe_relative must contain four ratios: x1, y1, x2, y2") from exc
         directions = {
             "down": (0.5, 0.2, 0.5, 0.8), "up": (0.5, 0.8, 0.5, 0.2),
             "left": (0.8, 0.5, 0.2, 0.5), "right": (0.2, 0.5, 0.8, 0.5),
             "下": (0.5, 0.2, 0.5, 0.8), "上": (0.5, 0.8, 0.5, 0.2),
             "左": (0.8, 0.5, 0.2, 0.5), "右": (0.2, 0.5, 0.8, 0.5),
         }
-        try: x1, y1, x2, y2 = directions[direction.lower()]
-        except (AttributeError, KeyError) as exc: raise ValueError("direction must be one of: down, up, left, right, 下, 上, 左, 右") from exc
+        if all(value is not None for value in custom_swipe):
+            x1, y1, x2, y2 = custom_swipe
+        else:
+            try: x1, y1, x2, y2 = directions[direction.lower()]
+            except (AttributeError, KeyError) as exc: raise ValueError("direction must be one of: down, up, left, right, 下, 上, 左, 右") from exc
+        # Validate a custom ratio gesture before the initial wait or any action.
+        self.relative_point(x1, y1); self.relative_point(x2, y2)
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
         for swipe_number in range(max_swipes + 1):

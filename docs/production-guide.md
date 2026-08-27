@@ -206,6 +206,8 @@ ocr_result = client.ocr()
 
 长列表中可使用 `scroll_until_image(template, direction="up", confidence=0.95, timeout=30, max_swipes=8, log=True)`。`direction` 是手势移动方向，支持上下左右，默认 `down`。它会先检查当前页面，再按该方向滑动并重试；找到后返回匹配结果但不自动点击。`log=True` 会在本机终端输出每次匹配与滚动决策，便于排查模板或阈值问题。`timeout` 是整个操作的最大时长，`max_swipes` 是最大滑动次数，两者任一先到都会停止，必须为业务场景设置合理值。
 
+列表的滚动轨迹或速度不适配默认值时，使用 `swipe_relative=(x1_ratio, y1_ratio, x2_ratio, y2_ratio)` 和 `duration_ms`。该元组会覆盖 `direction`；例如 `swipe_relative=(0.7, 0.75, 0.35, 0.25), duration_ms=650`。
+
 ## 6. Inspector 工作流
 
 在目标 App 已打开到待分析页面时执行：

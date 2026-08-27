@@ -101,6 +101,9 @@ device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=Tr
 
 # 默认向下滑动；任一上限先到即停止。
 match = device.scroll_until_image("assets/target.png", direction="down", confidence=0.95, timeout=30, max_swipes=8, log=True)
+
+# 自定义比例手势与每次滑动时长；提供后 direction 不参与轨迹计算。
+match = device.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration_ms=650)
 ```
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：
