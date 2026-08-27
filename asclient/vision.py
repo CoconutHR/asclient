@@ -67,7 +67,8 @@ class ScreenFrame:
 
     def crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
         x0, y0, x1, y1 = self._region((left, top, right, bottom), None)
-        return self.crop_pixels(x0, y0, x1, y1)
+        x1, y1 = max(x1, x0 + 1), max(y1, y0 + 1)
+        return self.crop_pixels(x0, y0, min(self.width, x1), min(self.height, y1))
 
     def _region(self, region: tuple[float, float, float, float] | None, region_pixels: tuple[int, int, int, int] | None) -> tuple[int, int, int, int]:
         if region is not None and region_pixels is not None: raise ValueError("region and region_pixels cannot be combined")

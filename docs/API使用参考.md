@@ -220,7 +220,7 @@ colors = frame.pixels_relative([(0.1, 0.1), (0.9, 0.9)])
 
 在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有结果坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。
 
-单模板可用比例 `region=(left, top, right, bottom)` 或绝对物理像素 `region_pixels=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_pixels` 为按模板名称映射的同类区域；每张模板可有自己的小区域。
+单模板和所有图像等待/点击/滚动 API 都可用比例 `region=(left, top, right, bottom)` 或绝对物理像素 `region_pixels=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_pixels` 为按模板名称映射的同类区域；每张模板可有自己的小区域。
 
 ```python
 match = client.find_image("assets/login-icon.png", confidence=0.95)
@@ -418,11 +418,15 @@ assert submit.count == 1
 submit.get().click()
 ```
 
-`SnapshotCollection` 支持 `.exists`、`.count`、`.info`、`.all()`、`.get()`，以及 `.child()`（直接子节点）、`.descendant()`（所有后代）、`.parent()`、`.sibling()`。`.where_regex(field, pattern)` 可用 Python 正则表达式在当前快照集合内筛选字段，例如 `snapshot().descendant().where_regex("name", r"item_\d+")`。正则和关系选择器只在本地快照中解释，绝不会发送给设备端 selector 协议。快照节点的 `info`、`rect`、`center` 已归一化为物理像素，但页面跳转后可能过期；在动作前需要最新页面状态时，请重新创建快照或使用普通 `device(...)` 查询。
+`SnapshotCollection` 支持 `.exists`、`.count`、`.info`、`.all()`、`.get()`，以及 `.child()`（直接子节点）、`.descendant()`（所有后代）、`.parent()`、`.sibling()`。`.where_regex(field, pattern)` 可用 Python 正则表达式在当前快照集合内筛选字段，例如 `snapshot().descendant().where_regex("name", r"item_\d+")`。快照对所有公开 selector 字段（包括 `name`、`label`、`type` 和状态字段）建立精确值倒排索引；精确属性查询先走索引，多条件、contains、正则和关系查询再在候选集上过滤，结果保持原始树顺序。`Selector.at()` / `.at_relative()` 在快照内按已归一化的物理矩形包含关系查询，最小命中矩形优先。关系、正则和点查询只在本地快照中解释，绝不会发送给设备端 selector 协议；快照忽略设备端专用的 `mode`、`max_depth`、`max_children` 限制。快照节点的 `info`、`rect`、`center` 已归一化为物理像素，但页面跳转后可能过期；在动作前需要最新页面状态时，请重新创建快照或使用普通 `device(...)` 查询。
 
 #### 坐标与图片委托
 
-`Device` 也直接暴露以下方法，语义与 `AScriptClient` 同名方法完全一致，方便只持有 `device` 时调用：`capture_frame()`、`pixel()` / `pixel_relative()`、`pixels()` / `pixels_relative()`、`click_relative()` / `click_rel()`、`swipe_relative()`、`find_image()`、`find_images()`、`find_any_image()`、`wait_image()`、`wait_any_image()`、`wait_image_gone()`、`tap_image()`、`scroll_until_image()`。参数见第 3 节与第 7 节的同名方法。
+`Device` 也直接暴露以下方法，语义与 `AScriptClient` 同名方法完全一致：
+
+- 绝对物理像素：`tap()`、`swipe()`、`pixel()`、`pixels()`、`screenshot_crop()`、`save_screenshot_crop()`；
+- 比例坐标：`click_relative()` / `click_rel()`、`swipe_relative()`、`pixel_relative()`、`pixels_relative()`、`screenshot_crop_relative()`、`save_screenshot_crop_relative()`；
+- 视觉：`capture_frame()`、`find_image()`、`find_images()`、`find_any_image()`、`wait_image()`、`wait_any_image()`、`wait_image_gone()`、`tap_image()`、`scroll_until_image()`。
 
 ### `Selector`
 
@@ -445,7 +449,8 @@ cancel = base.name("cancel_button")
 | `.visible(value=True)` | 按 visible 状态匹配 |
 | `.selected(value=True)` | 按 selected 状态匹配 |
 | `.index(value)` | 按节点 index 匹配；不建议作为唯一生产定位条件 |
-| `.at(x, y)` | 使用 point 模式从坐标处探测元素 |
+| `.at(x, y)` | 使用物理像素坐标从该点探测元素 |
+| `.at_relative(x_ratio, y_ratio)` | 按屏幕比例从该点探测元素 |
 | `.full()` | 使用 full 模式重新构建 selector |
 | `.title(value, contains=False)` | 按 title 匹配 |
 | `.focused(value=True)` | 按焦点状态匹配 |
@@ -489,7 +494,8 @@ submit.click()
 | `.rect` | `{"x", "y", "width", "height"}` 浮点字典 |
 | `.center` | `(x, y)` 矩形中心坐标 |
 | `.exists` | 始终为 `True`；对象代表已经解析到的元素 |
-| `.click()` | 以中心坐标点击 |
+| `.click()` | 以矩形中心的物理像素点击；空矩形抛 `ValueError` |
+| `.click_relative(x_ratio, y_ratio)` | 按元素矩形比例点击；`(0, 0)` 为左上、`(1, 1)` 为矩形内最后一个有效像素 |
 | `.set_text(text, interval_ms=120)` | 先点选再输入 |
 
 `UiObject` 是快照，不会在页面跳转后自动重新定位。页面发生变化后请重新使用 `UiCollection.get()` 或 `device.find()` 查询。

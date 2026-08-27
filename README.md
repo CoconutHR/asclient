@@ -133,13 +133,15 @@ if confirm.exists:
 
 # 也支持稳定的显式选择器和坐标点探测。
 device.selector().name("login_button")
-device.selector().at(200, 600)
+device.selector().at(200, 600)              # 绝对物理像素
+device.selector().at_relative(0.5, 0.5)     # 屏幕比例坐标
 
 # 也可按当前屏幕的宽高比例定位：屏幕中部偏下。
-device.click_rel(0.5, 0.92)
+device.tap(590, 2352)                       # 绝对物理像素
+device.click_rel(0.5, 0.92)                 # 比例坐标
 ```
 
-坐标规则：`screen_size()`、`action_size()`、控件树、截图、OCR 与 `tap`/`swipe` 都使用物理像素（该设备为 `1179 x 2556`）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的“动作坐标”。只有 `status()["logical_screen"]` 会显式提供移动端原始逻辑点，供协议诊断使用。
+坐标规则统一如下：**无后缀方法一律使用截图物理像素绝对坐标**，例如 `tap(x, y)`、`swipe(...)`、`Selector.at(x, y)`、`pixel(x, y)`、`screenshot_crop(left, top, right, bottom)`；**`*_relative` 一律使用 `0..1` 比例坐标**，例如 `tap_relative()`、`Selector.at_relative()`、`pixel_relative()`、`screenshot_crop_relative()`。找图的比例区域为 `region` / `regions`，物理像素区域为 `region_pixels` / `regions_pixels`。所有矩形均为 `left, top, right, bottom`，左上包含、右下排除。控件树、截图、OCR 与 `tap`/`swipe` 使用物理像素（该设备为 `1179 x 2556`）；只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断使用。
 
 截图支持比例裁剪，矩形采用 `left top right bottom`，范围为 `0..1`：
 

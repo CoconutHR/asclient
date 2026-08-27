@@ -351,7 +351,7 @@ class AScriptClient:
                 return name, match
         return None
 
-    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """等待本机模板出现并返回 ``ImageMatch``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
@@ -359,7 +359,7 @@ class AScriptClient:
         attempt = 0
         while True:
             attempt += 1
-            match = self.find_image(template, confidence=confidence, region=region)
+            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
             if match is not None:
                 if log: print(t("image_wait_found", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))
                 return match
@@ -379,7 +379,7 @@ class AScriptClient:
             if time.monotonic() >= deadline: raise TimeoutError(f"none of the images appeared before timeout: {', '.join(templates)}")
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
+    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
         """等待模板消失，成功返回 ``True``，超时返回 ``False``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
@@ -387,7 +387,7 @@ class AScriptClient:
         attempt = 0
         while True:
             attempt += 1
-            match = self.find_image(template, confidence=confidence, region=region)
+            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
             if match is None:
                 if log: print(t("image_wait_gone", attempt=attempt))
                 return True
@@ -395,9 +395,9 @@ class AScriptClient:
             if time.monotonic() >= deadline: return False
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, duration_ms: int = 20) -> ImageMatch:
+    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 20) -> ImageMatch:
         """等待模板出现后点击中心，``duration_ms`` 为点击持续毫秒数。"""
-        match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region)
+        match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region, region_pixels=region_pixels)
         self.tap(*match.center, duration_ms=duration_ms)
         return match
 
@@ -558,7 +558,7 @@ class AScriptClient:
         """Swipe between two points expressed as fractions of current screen dimensions."""
         return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
@@ -589,7 +589,7 @@ class AScriptClient:
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
         for swipe_number in range(max_swipes + 1):
-            match = self.find_image(template, confidence=confidence, region=region)
+            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
             attempt = swipe_number + 1
             if match is not None:
                 if log: print(t("image_scroll_match", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))

@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
+from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, UiObject, connect
 from asclient.cli import _stop_tunnel_on_sigterm, main
 from asclient.config import device_options, load_config, tunnel_options
 from asclient.doctor import DoctorCheck, _port_available, diagnose, save_report, set_iproxy_path
@@ -617,6 +617,37 @@ class ClientTests(unittest.TestCase):
         device = Device(self.client)
         with self.assertRaises(ValueError): device.find(device.selector().name("missing"), interval=0)
         with self.assertRaises(ValueError): device.wait_gone(device.selector().name("missing"), interval=0)
+
+    def test_coordinate_api_pairs_and_snapshot_index_keep_tree_order(self):
+        original_tree, original_tap, original_size = self.client.ui_tree, self.client.tap, self.client.action_size
+        self.client.ui_tree = lambda **kwargs: {"views": [{"name": "root", "x": 0, "y": 0, "width": 100, "height": 200, "childs": [{"name": "button", "type": "Button", "label": "A", "x": 10, "y": 20, "width": 30, "height": 40, "childs": []}, {"name": "button", "type": "Button", "label": "B", "x": 50, "y": 60, "width": 20, "height": 30, "childs": []}]}]}
+        taps = []; self.client.tap = lambda x, y, **kwargs: taps.append((x, y, kwargs))
+        try:
+            device = Device(self.client); snapshot = device.snapshot()
+            self.assertEqual([item.info["label"] for item in snapshot(name="button").all()], ["A", "B"])
+            self.assertEqual(snapshot.select(device.selector().at(15, 25)).info["label"], "A")
+            self.client.action_size = lambda: {"width": 100, "height": 200}
+            self.assertEqual(snapshot.select(device.selector().at_relative(.15, .125)).info["label"], "A")
+            element = snapshot(name="button").get(); element.object.click_relative(1, 1)
+            self.assertEqual(taps[0][:2], (39.0, 59.0))
+            self.assertTrue(hasattr(device, "tap")); self.assertTrue(hasattr(device, "screenshot_crop"))
+        finally:
+            self.client.ui_tree, self.client.tap, self.client.action_size = original_tree, original_tap, original_size
+
+    def test_empty_element_rectangles_and_absolute_image_regions_are_validated(self):
+        device = Device(self.client)
+        with self.assertRaises(ValueError):
+            UiObject(device, {"x": 0, "y": 0, "width": 0, "height": 0}, device.selector()).click()
+        from io import BytesIO
+        from PIL import Image
+        screen, template = Image.new("RGB", (8, 8), "black"), Image.new("RGB", (2, 2), "red")
+        screen.paste(template, (4, 4)); source, needle = BytesIO(), BytesIO(); screen.save(source, "PNG"); template.save(needle, "PNG")
+        original = self.client.screenshot; self.client.screenshot = lambda: source.getvalue()
+        try:
+            self.assertEqual(self.client.wait_image(needle.getvalue(), confidence=1, timeout=0, initial_delay=False, region_pixels=(4, 4, 8, 8)).center, (5.0, 5.0))
+            with self.assertRaises(ValueError): self.client.wait_image(needle.getvalue(), timeout=0, initial_delay=False, region=(0, 0, 1, 1), region_pixels=(0, 0, 8, 8))
+        finally:
+            self.client.screenshot = original
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve
