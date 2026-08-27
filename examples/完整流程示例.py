@@ -41,21 +41,21 @@ def main() -> None:
     with Run(device, artifacts_root="artifacts") as run:
         # 1. 动作之前先断言页面状态：三个关键控件必须存在且唯一。
         #    assert_unique 命中多个或零个都会失败，并自动采集证据。
-        #    步骤名使用 ASCII 字符：证据文件名由步骤名生成，中文名
-        #    在当前版本会退化为 step_*（manifest.json 仍保留原始名称）。
-        username = run.assert_unique(device.selector().name(USERNAME_INPUT), name="check_username")
-        password = run.assert_unique(device.selector().name(PASSWORD_INPUT), name="check_password")
-        submit = run.assert_unique(device.selector().text(LOGIN_BUTTON), name="check_login_button")
+        #    步骤名可用中文，会直接生成证据文件名（如 断言用户名_failure.png）；
+        #    / \ : 等文件名非法字符会被替换为下划线。
+        username = run.assert_unique(device.selector().name(USERNAME_INPUT), name="断言用户名输入框")
+        password = run.assert_unique(device.selector().name(PASSWORD_INPUT), name="断言密码输入框")
+        submit = run.assert_unique(device.selector().text(LOGIN_BUTTON), name="断言登录按钮")
 
         # 2. 填写表单。set_text 会先点击控件取得焦点再输入；
         #    带参数的动作用 lambda 包装后交给 run.step 记录耗时。
-        run.step("fill_username", lambda: username.set_text(TEST_ACCOUNT[0]))
-        run.step("fill_password", lambda: password.set_text(TEST_ACCOUNT[1]))
+        run.step("填写用户名", lambda: username.set_text(TEST_ACCOUNT[0]))
+        run.step("填写密码", lambda: password.set_text(TEST_ACCOUNT[1]))
 
         # 3. 点击登录并等待首页标识。wait 超时会先采集失败证据再抛出异常，
         #    避免后续步骤在错误页面上继续执行。
-        run.step("tap_login", submit.click, capture_after=True)
-        run.wait(device.selector().name(HOME_MARK), timeout=15, name="wait_home")
+        run.step("点击登录", submit.click, capture_after=True)
+        run.wait(device.selector().name(HOME_MARK), timeout=15, name="等待首页")
 
         # 4. 如登录过程有 loading 遮罩，可在点击后用模板等待其消失；
         #    模板图片由 Inspector 的“裁剪保存”生成，放于 assets/ 目录：

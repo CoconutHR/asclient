@@ -667,11 +667,11 @@ py -m asclient --yes --device 192.168.3.17:9096 api GET /api/node/dump --params 
 py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--timeout SECONDS] <command>
 ```
 
-任何改变设备状态的命令必须在命令前加 `--yes`。这是非交互式确认，便于脚本审计：
+任何改变设备状态的命令必须显式加 `--yes`，可写在命令前或命令后。这是非交互式确认，便于脚本审计：
 
 ```bat
 py -m asclient --yes deploy smoke .\smoke.py --logs 5
-py -m asclient --yes remove smoke
+py -m asclient remove smoke --yes
 ```
 
 不带 `--yes` 时客户端在发送请求前失败，并打印目标设备和被拒绝的动作。Python 库 API 不会重复要求确认，因为调用者代码本身已是显式授权边界。
