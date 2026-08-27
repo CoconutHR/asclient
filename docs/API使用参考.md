@@ -1,8 +1,8 @@
 # ASClient API 使用参考
 
-首次使用请先阅读[从零开始使用教程](quick-start.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。
+首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应 ASClient `0.7.11`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.8.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -51,22 +51,32 @@ device = connect("192.168.3.17:9096", timeout=20)
 
 ### `AScriptTunnel`
 
-推荐的 USB 隧道管理器。一次启动 AScript HTTP 服务的 `9096` 映射和日志 WebSocket 的 `10102` 映射，任一映射启动失败时会停止另一条映射。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](usb-tunnel.md)。
+推荐的 USB 隧道管理器。一次启动 AScript HTTP 服务的 `9096` 映射和日志 WebSocket 的 `10102` 映射，任一映射启动失败时会停止另一条映射。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](USB隧道运维指南.md)。
 
 ```python
 from asclient import AScriptTunnel, connect
 
-with AScriptTunnel(udid="") as tunnel:
+with AScriptTunnel.from_config() as tunnel:   # 读取 asclient.json 的 tunnel 段
     device = connect(tunnel.address)
     print(tunnel.log_address)  # 127.0.0.1:10102
     print(device.client.status())
 ```
 
-可配置 `local_port`、`remote_port`、`local_log_port`、`remote_log_port`、`udid`、`executable`、`local_host` 和 `startup_timeout`。`forward_logs=False` 只映射 HTTP 服务。`.address` 是 HTTP 客户端地址，`.log_address` 是日志地址或 `None`，`.start()` / `.stop()` 管理两条映射的生命周期。
+#### `from_config(path=None, **overrides) -> AScriptTunnel`
+
+读取 `asclient.json`（或 `path` 指定的配置文件）的 `tunnel` 段创建隧道；配置文件不存在时退回内置默认值。优先级为“显式参数 > 配置文件 > 内置默认值”，参数名与配置键一致：`iproxy`、`local_port`、`remote_port`、`local_log_port`、`remote_log_port`、`forward_logs`、`udid`、`local_host`、`startup_timeout`。过时别名 `executable` 等效 `iproxy`，使用时发出 `DeprecationWarning`，将在后续版本移除；与 `iproxy` 同时使用或传入未知参数抛出 `ValueError`。
+
+```python
+# 配置存了设备 A 的 udid 与 iproxy 路径；临时切换设备 B，其余沿用配置。
+with AScriptTunnel.from_config(udid="设备B的UDID") as tunnel:
+    device = connect(tunnel.address)
+```
+
+直接构造 `AScriptTunnel(...)` 不读取配置文件，字段名也与配置键不同（`executable` 对应 `iproxy`），仅用于完全显式控制的场景。可配置 `local_port`、`remote_port`、`local_log_port`、`remote_log_port`、`udid`、`executable`、`local_host` 和 `startup_timeout`。`forward_logs=False` 只映射 HTTP 服务。`.address` 是 HTTP 客户端地址，`.log_address` 是日志地址或 `None`，`.start()` / `.stop()` 管理两条映射的生命周期。
 
 ### `IProxyTunnel`
 
-管理一个由外部 `iproxy` 提供的 USB 端口转发。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](usb-tunnel.md)。
+管理一个由外部 `iproxy` 提供的 USB 端口转发。适用于电脑与手机不在同一网段的场景；完整流程见 [USB 隧道运维指南](USB隧道运维指南.md)。
 
 ```python
 from asclient import IProxyTunnel, connect
@@ -318,6 +328,14 @@ if element is None:
     raise RuntimeError("login button not found")
 ```
 
+#### `wait(selector, *, timeout=10, log=False) -> UiObject`
+
+等待元素出现并返回；超时抛出 `LookupError`。适合“缺失即为失败”的关键控件，与 `find()` 的返回 `None` 语义互补。
+
+#### `wait_gone(selector, *, timeout=10, log=False) -> bool`
+
+等待元素消失；消失返回 `True`，超时返回 `False`。
+
 #### `dump_hierarchy(*, mode="smart") -> str`
 
 等价于 `client.ui_xml()`，用于保存诊断 XML。
@@ -325,6 +343,10 @@ if element is None:
 #### `screenshot(destination=None) -> bytes | Path`
 
 未传 `destination` 时返回 PNG bytes；传入本地路径时保存并返回 `Path`。
+
+#### 坐标与图片委托
+
+`Device` 也直接暴露以下方法，语义与 `AScriptClient` 同名方法完全一致，方便只持有 `device` 时调用：`click_relative()` / `click_rel()`、`swipe_relative()`、`find_image()`、`wait_image()`、`wait_image_gone()`、`tap_image()`、`scroll_until_image()`。参数见第 3 节与第 7 节的同名方法。
 
 ### `Selector`
 
@@ -425,7 +447,7 @@ with Run(device, artifacts_root="artifacts") as run:
 | --- | --- |
 | `step(name, action, capture_before=False, capture_after=False)` | 在设备锁内执行 action，记录耗时与结果；失败时自动采集诊断证据后重新抛出原异常 |
 | `capture(label, mode="smart")` | 立即采集截图、XML 和设备上下文 |
-| `wait(selector, timeout=10, name="wait")` | 等待元素出现；超时自动采集失败证据 |
+| `wait(selector, timeout=10, name="wait", log=False)` | 等待元素出现；超时自动采集失败证据 |
 | `assert_unique(selector, name="assert_unique")` | 断言 selector 恰好命中一个元素，并返回该元素 |
 
 `manifest.json` 会在每个步骤结束后更新，记录运行 ID、设备地址、开始/结束时间、步骤耗时、结果、异常和实际写入的证据路径。
@@ -684,8 +706,8 @@ py -m asclient --yes remove smoke
 | `push` | `--yes push PROJECT SOURCE [REMOTE]` | 上传单文件或目录 |
 | `pull` | `pull PROJECT [OUTPUT]` | 下载项目文件 |
 | `run` / `stop` | `--yes run PROJECT` / `--yes stop` | 启动/停止项目 |
-| `deploy` | `--yes deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]` | 上传、运行、取日志和截图 |
-| `log` | `log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]` | 输出、筛选或 JSONL 落盘实时日志 |
+| `deploy` | `--yes deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]` | 上传、运行、取日志和截图；`--logs` 默认收集 5 秒 |
+| `log` | `log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]` | 输出、筛选或 JSONL 落盘实时日志；不传秒数时默认读取 3 秒 |
 | `cat` | `cat REMOTE_PATH [OUTPUT]` | 打印或保存远程文件 |
 | `eval` | `--yes eval CODE` | 执行受信任设备端 Python |
 | `api` | `--yes api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
@@ -710,7 +732,7 @@ run_forever(client, host="127.0.0.1", port=0)
 
 | 函数 | 说明 |
 | --- | --- |
-| `serve(client, host="127.0.0.1", port=0, open_browser=True)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口 |
+| `serve(client, host="127.0.0.1", port=0, open_browser=True, output_dir=None)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口；`output_dir` 指定“裁剪保存”的落盘目录，默认当前工作目录 |
 | `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
 
 Inspector 只应绑定 `127.0.0.1`。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部“裁剪保存”按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。

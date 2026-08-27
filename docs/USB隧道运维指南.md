@@ -112,10 +112,10 @@ py -m asclient doctor --report artifacts\usb-doctor.json
 
 它会分别报告 `iproxy`、本机 `9096/10102`、设备控制服务和日志端口。端口被占用时不会自动终止其他进程；缺少 `iproxy` 时不会自动下载安装。若已手工安装但未加入 `PATH`，可在审查路径后执行 `py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"`，再确认写入配置。
 
-成功后会显示：
+成功后会显示（路由中 `service` 为控制端口映射，`logs` 为日志端口映射）：
 
 ```text
-USB tunnel is running: service=127.0.0.1:9096 -> device:9096; logs=127.0.0.1:10102 -> device:10102.
+USB 隧道已启动：service=127.0.0.1:9096 -> device:9096; logs=127.0.0.1:10102 -> device:10102。请将 device.address 设置为 127.0.0.1:9096。按 Ctrl+C 停止。
 ```
 
 在另一个终端中使用正常命令：
@@ -142,23 +142,25 @@ py -m asclient --device 127.0.0.1:19096 status
 ```python
 from asclient import AScriptTunnel, connect
 
-with AScriptTunnel(udid="") as tunnel:
+with AScriptTunnel.from_config(udid="") as tunnel:   # 读取 asclient.json 的 tunnel 段
     device = connect(tunnel.address)
     print(device.client.status())
 ```
+
+`from_config()` 与 CLI `tunnel` 命令读取同一份配置，优先级为“显式参数 > 配置文件 > 内置默认值”；`with` 退出（包括异常）时自动停止两条映射。配置文件不存在时退回内置默认值，不确定配置是否被读取时可用 `py -m asclient doctor` 检查。
 
 `AScriptTunnel` 默认同时映射日志端口，因此日志无需额外处理：
 
 ```python
 from asclient import AScriptClient, AScriptTunnel
 
-with AScriptTunnel():
+with AScriptTunnel.from_config():
     client = AScriptClient("127.0.0.1:9096")
     for entry in client.logs(duration=5):
         print(entry.message)
 ```
 
-高级调用可继续使用 `IProxyTunnel` 建立单个非标准端口映射。
+高级调用可继续使用 `IProxyTunnel` 建立单个非标准端口映射。直接构造 `AScriptTunnel(executable="...")` 不读取配置文件，字段名也与配置键不同（`executable` 对应 `iproxy`），仅适合完全显式控制的场景；从零开始教程的 5.3 节有完整的脚本示例。
 
 ## 安全边界
 

@@ -2,7 +2,60 @@
 
 `asclient` 是 AScript iOS 本地设备服务的 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力；仅本机模板匹配功能依赖 Pillow。
 
-完整中文文档： [从零开始使用教程](docs/quick-start.md)、[生产使用指南](docs/production-guide.md)、[API 使用参考](docs/api-reference.md)、[USB 隧道运维指南](docs/usb-tunnel.md)、[发布与验收流程](docs/release-process.md)。
+完整中文文档：[从零开始使用教程](docs/从零开始使用教程.md)、[生产使用指南](docs/生产使用指南.md)、[API 使用参考](docs/API使用参考.md)、[USB 隧道运维指南](docs/USB隧道运维指南.md)、[发布与验收流程](docs/发布与验收流程.md)。
+
+## 最短上手
+
+前提：手机已开启 AScript 服务，且电脑与手机在同一网络（USB 场景见下文“快速诊断与 USB 连接”）。三步走：安装 → 配置 → 验证。
+
+```bat
+py -m pip install --user --upgrade .
+copy asclient.example.json asclient.json
+edit asclient.json
+```
+
+`asclient.json` 中把 `device.address` 改为手机 AScript 页面显示的地址，例如 `192.168.3.17:9096`。然后验证连接：
+
+```bat
+py -m asclient status
+```
+
+输出中 `"available": true` 即连接成功（部分设备显示 `health: "degraded"` 属于已知兼容降级，不代表失败）。接着用五行 Python 完成第一次自动化：
+
+```python
+from asclient import connect
+
+device = connect("192.168.3.17:9096")   # 与 asclient.json 中一致
+print(device(text="登录").count)         # 先确认恰好命中一个控件
+device(text="登录").click()             # 确认无误后再点击
+```
+
+## 任务速查
+
+以下 `device` 指 `connect()` 返回的对象，`client` 指低层 `AScriptClient`（可从 `device.client` 取得）；`timeout`、`interval` 单位为秒。完整参数见 [API 使用参考](docs/API使用参考.md)。
+
+| 我想… | 写法 |
+| --- | --- |
+| 截图留证 | `device.screenshot("evidence/step.png")` |
+| 点击文本为“登录”的按钮 | `device(text="登录").click()` |
+| 按控件名（accessibility name）定位 | `device(name="login_button")` |
+| 确认控件存在 / 数量 | `device(text="登录").exists` / `.count` |
+| 等控件出现（最多 10 秒） | `device(text="首页").get(timeout=10)` |
+| 等控件出现，超时直接报错 | `device.wait(device.selector().text("首页"), timeout=10)` |
+| 等控件消失 | `device(text="弹窗").wait_gone(timeout=10)` |
+| 找到才点击，找不到不报错 | `device(text="同意").click_exists(timeout=5)` |
+| 输入文本（自动先点击控件取得焦点） | `device(resource_id="username").set_text("hello")` |
+| 等图片出现并返回坐标 | `client.wait_image("assets/login.png", confidence=0.95)` |
+| 等图片出现后点击中心 | `client.tap_image("assets/继续.png", timeout=10)` |
+| 等 loading 图片消失再继续 | `client.wait_image_gone("assets/loading.png", timeout=20)` |
+| 滚动列表直到目标图片出现 | `client.scroll_until_image("assets/target.png", direction="up")` |
+| 按屏幕比例点击（底部中央） | `device.click_rel(0.5, 0.92)` |
+| 按屏幕比例滑动 | `client.swipe_relative(0.5, 0.8, 0.5, 0.2)` |
+| 识别屏幕文字 | `client.ocr()` |
+| 读取控件树 XML 字符串 | `device.dump_hierarchy()` |
+| 每步自动留证据的可靠执行 | `run.step("登录", login.click, capture_after=True)` |
+| 等待日志出现标记 | `client.wait_for_log("READY", timeout=10)` |
+| 在 Python 中管理 USB 隧道（读配置） | `with AScriptTunnel.from_config() as tunnel:` |
 
 ## IDE 提示
 
@@ -120,6 +173,8 @@ with Run(device) as run:
     login = run.assert_unique(device.selector().name("login_button"))
     run.step("open_login", login.click, capture_after=True)
 ```
+
+完整可运行的带注释示例见 [examples/完整流程示例.py](examples/完整流程示例.py) 与[从零开始使用教程](docs/从零开始使用教程.md)第 10 节。
 
 ## Inspector 与真机验收
 
