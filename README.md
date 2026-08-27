@@ -4,6 +4,10 @@
 
 完整中文文档： [生产使用指南](docs/production-guide.md)、[API 使用参考](docs/api-reference.md)、[USB 隧道运维指南](docs/usb-tunnel.md)、[发布与验收流程](docs/release-process.md)。
 
+## IDE 提示
+
+包内置类型注解、中文 docstring 和 `py.typed` 标记。安装后在 PyCharm 或 VS Code/Pylance 中输入 `client.`、`device.` 或将鼠标悬停在方法上，可看到参数类型、中文单位说明、默认值与返回类型。参数名保持英文以兼容 Python 生态；坐标单位、`timeout`/`interval` 秒与 `duration_ms` 毫秒会在中文说明中明确标注。
+
 ```python
 from asclient import AScriptClient
 
@@ -137,4 +141,4 @@ py -m unittest discover -s tests -p test_integration.py -v
 
 推荐使用 `py -m asclient`，不依赖 Windows Python `Scripts` 目录是否已加入 `PATH`。兼容入口 `py asc.py ...` 仍然可用。
 
-该库仅依赖 Python 标准库。移动端 API 已针对 iOS 4001 IPA 进行静态分析，并已通过真实 USB 连接验证；生产发布前仍应在目标 App、目标 iOS 版本和目标设备上执行集成验收。
+除模板匹配所需的 Pillow 外，该库只依赖 Python 标准库。移动端 API 已针对 iOS 4001 IPA 进行静态分析，并已通过真实 USB 连接验证；生产发布前仍应在目标 App、目标 iOS 版本和目标设备上执行集成验收。

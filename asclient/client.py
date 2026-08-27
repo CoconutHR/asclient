@@ -70,10 +70,10 @@ class ImageMatch:
 
 
 class AScriptClient:
-    """Client for one AScript device-service endpoint.
+    """AScript 单台设备服务客户端。
 
-    ``request`` intentionally remains public for confirmed but not yet
-    high-level-wrapped endpoints.
+    参数 ``address`` 为 ``HOST[:PORT]``；``password`` 为可选服务密码；
+    ``timeout`` 单位为秒。所有公开坐标均使用截图物理像素。
     """
 
     def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1):
@@ -95,6 +95,11 @@ class AScriptClient:
         return result
 
     def request(self, method: str, path: str, *, params: Optional[Mapping[str, Any]] = None, form: Optional[Mapping[str, Any]] = None, data: Optional[bytes] = None, headers: Optional[Mapping[str, str]] = None, timeout: Optional[float] = None) -> bytes:
+        """调用已确认的原始 HTTP 接口并返回字节。
+
+        ``path`` 必须以 ``/`` 开头；``timeout`` 单位秒。仅在高层 API
+        尚未覆盖的稳定设备端接口中使用。
+        """
         if not path.startswith("/"):
             raise ValueError(t("path_must_start"))
         if form is not None and data is not None:
@@ -141,10 +146,9 @@ class AScriptClient:
         return "iOS" if not raw.strip() else ("Android" if json.loads(raw.decode("utf-8")).get("code") == 1 else "iOS")
 
     def status(self) -> dict[str, Any]:
-        """Return status, degrading gracefully for iOS 4001's broken endpoint.
+        """读取设备状态并在 iOS 4001 状态接口异常时降级。
 
-        Its bundled implementation calls the Objective-C ``languageCode``
-        property as a method, which fails on some Rubicon versions.
+        ``screen`` 为实际物理分辨率；``logical_screen`` 仅用于协议诊断。
         """
         try:
             result = self._ok(self.json("GET", "/api/status")).get("data", {})
@@ -184,7 +188,7 @@ class AScriptClient:
             if capabilities is not None: capabilities["screen"] = "unavailable"
 
     def packages(self) -> list[Any]:
-        """Return the installed package list reported by the iOS status API."""
+        """返回设备端 Python 包列表，元素通常为 ``[名称, 版本]``。"""
         status = self.status()
         packages = status.get("python", {}).get("packages")
         if packages is not None:
@@ -227,6 +231,7 @@ class AScriptClient:
         return sorted(found, key=lambda item: (int(ipaddress.IPv4Address(item[0].host)), item[0].port))
 
     def screenshot(self) -> bytes:
+        """获取当前屏幕 PNG 字节，坐标尺寸与 ``tap`` 一致。"""
         return self.request("GET", "/api/screen/capture", timeout=30)
 
     @staticmethod
@@ -241,7 +246,7 @@ class AScriptClient:
         return float(width), float(height)
 
     def action_size(self) -> dict[str, float]:
-        """Return the physical-pixel coordinate space used by ``tap`` and ``swipe``.
+        """返回 ``tap``、``swipe``、OCR 使用的物理像素尺寸。
 
         AScript's iOS action module uses screenshot pixels, while
         :meth:`screen_size` reports iOS logical points.  The two must not be
@@ -253,7 +258,7 @@ class AScriptClient:
         return {"width": size[0], "height": size[1]}
 
     def screen_size(self) -> dict[str, float]:
-        """Return the current physical screen resolution used for actions.
+        """返回当前真实物理屏幕分辨率。
 
         This is the same coordinate system as screenshots, OCR, ``tap`` and
         ``swipe``.
@@ -261,6 +266,7 @@ class AScriptClient:
         return self.action_size()
 
     def save_screenshot(self, destination: str | Path) -> Path:
+        """保存完整 PNG 截图到 ``destination``，返回绝对路径。"""
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self.screenshot())
@@ -320,7 +326,10 @@ class AScriptClient:
         return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(cropped)) + chunk(b"IEND", b"")
 
     def screenshot_crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
-        """Capture and crop a screenshot with a relative ``left, top, right, bottom`` rectangle."""
+        """抓取并按 ``left, top, right, bottom`` 比例裁剪 PNG。
+
+        四个值范围 ``0..1``，表示左、上、右、下边界。
+        """
         return self.crop_png_relative(self.screenshot(), left, top, right, bottom)
 
     def save_screenshot_crop_relative(self, destination: str | Path, left: float, top: float, right: float, bottom: float) -> Path:
@@ -369,11 +378,19 @@ class AScriptClient:
         return best
 
     def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None) -> ImageMatch | None:
-        """Find a local image template in the current screenshot."""
+        """在当前截图中匹配本机模板。
+
+        ``confidence`` 范围 ``(0, 1]``；``region`` 为比例区域
+        ``(left, top, right, bottom)``；未命中返回 ``None``。
+        """
         return self._image_match(self.screenshot(), template, confidence=confidence, region=region)
 
     def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
-        """Wait until a local image template appears, then return its match."""
+        """等待本机模板出现并返回 ``ImageMatch``。
+
+        ``timeout``、``interval`` 单位秒；默认先等待一个 ``interval``；
+        ``initial_delay=False`` 立即探测；``log=True`` 输出每轮状态。
+        """
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
@@ -389,7 +406,10 @@ class AScriptClient:
             time.sleep(min(interval, deadline - time.monotonic()))
 
     def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
-        """Wait until a local image template is no longer present."""
+        """等待模板消失，成功返回 ``True``，超时返回 ``False``。
+
+        参数单位和 ``wait_image`` 相同。
+        """
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
@@ -405,7 +425,7 @@ class AScriptClient:
             time.sleep(min(interval, deadline - time.monotonic()))
 
     def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, duration_ms: int = 20) -> ImageMatch:
-        """Wait for a template and tap its center."""
+        """等待模板出现后点击中心，``duration_ms`` 为点击持续毫秒数。"""
         match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region)
         self.tap(*match.center, duration_ms=duration_ms)
         return match
@@ -432,11 +452,13 @@ class AScriptClient:
         return result
 
     def ui_xml(self, *, mode: str = "smart", depth: int = 0, x: float = 0, y: float = 0) -> str:
+        """获取物理像素坐标已归一化的 XML 控件树。"""
         logical, action = self._coordinate_spaces()
         raw = self.request("GET", "/api/node/dump", params={"mode": mode, "depth": depth, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}, timeout=30).decode("utf-8")
         return self._scale_xml_coordinates(raw, action["width"] / logical["width"], action["height"] / logical["height"])
 
     def ui_tree(self, *, mode: str = "smart", selector: Optional[Mapping[str, Any]] = None, x: float = 0, y: float = 0) -> dict[str, Any]:
+        """获取结构化控件树；``x/y`` 为物理像素点探测坐标。"""
         logical, action = self._coordinate_spaces()
         params: dict[str, Any] = {"mode": mode, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}
         if selector is not None:
@@ -473,6 +495,7 @@ class AScriptClient:
         return value
 
     def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
+        """点击物理像素 ``x/y``；``duration_ms`` 单位毫秒。"""
         with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
     def _logical_screen(self) -> dict[str, float]:
@@ -598,6 +621,7 @@ class AScriptClient:
         raise TimeoutError(f"image did not appear after {max_swipes} {direction} swipes or before timeout")
 
     def input_text(self, text: str, *, interval_ms: int = 120) -> Any:
+        """向当前焦点输入文本；``interval_ms`` 为字符间隔毫秒数。"""
         with self.locked(): return self.eval_python("from ascript.ios.action import input\ninput(%s, %r)\n_result=True" % (json.dumps(text, ensure_ascii=False), interval_ms))
 
     def home(self) -> Any:

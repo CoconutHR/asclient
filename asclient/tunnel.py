@@ -21,7 +21,7 @@ def _iproxy_not_found_message(executable: str) -> str:
 
 @dataclass
 class IProxyTunnel:
-    """Forward one local TCP port to an iOS device port over USB.
+    """通过 USB 将一个本机 TCP 端口映射到 iOS 设备端口。
 
     ``iproxy`` is intentionally an explicit external dependency. It is the
     portable libimobiledevice implementation of the USB multiplexing bridge;
@@ -125,7 +125,7 @@ class IProxyTunnel:
 
 @dataclass
 class AScriptTunnel:
-    """Forward the AScript service and optional log stream over USB.
+    """通过 USB 同时映射 AScript 控制服务与可选日志服务。
 
     This is the preferred USB tunnel for AScript: the HTTP service uses port
     ``9096`` and the log WebSocket uses port ``10102``.  ``IProxyTunnel``

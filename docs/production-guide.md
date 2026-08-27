@@ -59,6 +59,10 @@ py -m unittest discover -s tests -v
 
 发布前记录 Git 提交、包版本、设备型号、iOS 版本、AScript 版本和目标 App 版本；这五项构成问题复现的最小环境信息。
 
+### 3.1 PyCharm 与 VS Code
+
+`asclient` 发布包包含内联类型注解、中文 API docstring 与 `py.typed` 标记。PyCharm 和 VS Code 的 Pylance 均会据此提示方法签名、参数类型、默认值、返回类型以及中文用途说明。参数名保持英文，例如 `timeout`、`interval`、`duration_ms`；悬浮说明会标注前两者单位为秒、后者为毫秒。若刚升级本地源码，请在 IDE 解释器中重新执行 `py -m pip install --user --upgrade .`，再重启语言服务或重新打开项目。
+
 ## 4. 连通性验收
 
 每次新设备、网络切换或 AScript 更新后，先执行：

@@ -25,7 +25,7 @@ def _label(value: str) -> str:
 
 @dataclass
 class Run:
-    """Serialize one device workflow and preserve inspectable execution evidence.
+    """串行执行设备流程并保存可检查证据。
 
     Failed steps always capture screenshot, XML and device context. Successful
     steps can request before/after evidence explicitly when diagnosing a flow.
@@ -62,7 +62,7 @@ class Run:
         return self.client.capture_artifacts(self.directory, prefix=_label(label), mode=mode)
 
     def step(self, name: str, action: Callable[[], T], *, capture_before: bool = False, capture_after: bool = False) -> T:
-        """Run one action under the device lock and append its result to manifest."""
+        """执行一个步骤并写入清单；可选前后截图、XML 与状态证据。"""
         label = _label(name)
         record: dict[str, Any] = {"name": name, "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
         self.manifest["steps"].append(record)

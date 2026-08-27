@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Selector:
-    """An immutable AScript element selector.
+    """不可变 AScript 控件选择器。
 
     ``device(text="Continue", type="XCUIElementTypeButton")`` is the most
     convenient entry point.  ``contains`` changes matching for one property.
@@ -113,7 +113,10 @@ class UiObject:
 
 @dataclass
 class Device:
-    """High-level device facade modelled after uiautomator2's ``Device``."""
+    """类似 uiautomator2 的高层设备入口。
+
+    通过 ``device(text="确定")`` 创建控件集合；坐标均为物理像素。
+    """
 
     client: "AScriptClient"
 
@@ -138,11 +141,13 @@ class Device:
         return UiCollection(self, selector).get(timeout=timeout, log=log)
 
     def wait(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> UiObject:
+        """等待控件出现；``timeout`` 单位秒，``log`` 输出每轮检查。"""
         result = self.find(selector, timeout=timeout, log=log)
         if result is None: raise LookupError(f"element did not appear within {timeout}s: {selector.code()}")
         return result
 
     def wait_gone(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> bool:
+        """等待控件消失；超时返回 ``False``。"""
         return UiCollection(self, selector).wait_gone(timeout=timeout, log=log)
 
     def dump_hierarchy(self, *, mode: str = "smart") -> str:
@@ -186,6 +191,7 @@ class Device:
 
 @dataclass
 class UiCollection:
+    """一个选择器对应的延迟查询控件集合。"""
     device: Device
     selector: Selector
 
