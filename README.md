@@ -96,6 +96,9 @@ py -m asclient shot artifacts\bottom.png --crop-rel 0 0.5 1 1
 match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15)
 device.tap(*match.center)
 device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
+
+# 每次向上滑动后重试，直到图标出现。
+match = device.scroll_until_image("assets/target.png", confidence=0.95, max_swipes=8)
 ```
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：

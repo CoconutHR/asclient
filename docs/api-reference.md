@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.7.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.1`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -205,6 +205,18 @@ client.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
 
 # 等待后自动点击模板中心。
 client.tap_image("assets/continue.png", confidence=0.93, timeout=10)
+```
+
+### `scroll_until_image()`
+
+每次匹配失败后向上滑动，直到模板出现。默认从 `(0.5, 0.8)` 滑到 `(0.5, 0.2)`，最多 10 次；匹配会在第一次滑动前以及每次滑动后执行。`confidence`、`region`、`timeout` 和 `interval` 与 `wait_image()` 相同；`max_swipes` 限制最多滑动次数，`duration_ms` 为每次滑动时长。找到时返回 `ImageMatch`，超时或达到次数时抛出 `TimeoutError`。
+
+```python
+target = client.scroll_until_image(
+    "assets/target.png", confidence=0.95, timeout=30, max_swipes=8,
+    region=(0, 0.15, 1, 0.95),
+)
+client.tap(*target.center)
 ```
 
 模板匹配依赖 Pillow，随 `asclient` 一起安装。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。

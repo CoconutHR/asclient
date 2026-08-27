@@ -161,6 +161,10 @@ class Device:
         """Swipe between two fractional screen coordinates."""
         return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration_ms=duration_ms)
 
+    def scroll_until_image(self, template: str | Path | bytes, **kwargs: Any) -> Any:
+        """Scroll upward until a local image template appears."""
+        return self.client.scroll_until_image(template, **kwargs)
+
 
 @dataclass
 class UiCollection:

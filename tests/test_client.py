@@ -100,6 +100,21 @@ class ClientTests(unittest.TestCase):
         self.assertEqual((match.x, match.y, match.width, match.height), (12, 8, 4, 3))
         self.assertIsNone(self.client._image_match(source_data.getvalue(), template_data.getvalue(), confidence=0.99, region=(0, 0, 0.4, 0.3)))
 
+    def test_scroll_until_image_checks_before_each_upward_swipe(self):
+        original_find, original_swipe, original_relative = self.client.find_image, self.client.swipe_relative, self.client.relative_point
+        attempts, swipes = [], []
+        try:
+            self.client.find_image = lambda *args, **kwargs: attempts.append(1) or ({} if len(attempts) == 3 else None)
+            self.client.swipe_relative = lambda *args, **kwargs: swipes.append((args, kwargs))
+            self.client.relative_point = lambda *args: (1, 1)
+            result = self.client.scroll_until_image(b"template", max_swipes=4, interval=0.001)
+        finally:
+            self.client.find_image, self.client.swipe_relative, self.client.relative_point = original_find, original_swipe, original_relative
+        self.assertEqual(result, {})
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(len(swipes), 2)
+        self.assertEqual(swipes[0][0], (0.5, 0.8, 0.5, 0.2))
+
     def test_upload_builds_multipart_and_safe_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "main.py"; source.write_text("print(1)", encoding="utf-8")
