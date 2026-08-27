@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.6.2`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.6.3`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -403,6 +403,19 @@ with Run(device, artifacts_root="artifacts") as run:
 client.tap(200, 600)
 ```
 
+### `screen_size()`、`relative_point()` 与 `tap_relative()`
+
+按当前真机的 AScript 屏幕尺寸进行比例定位，适合固定在“屏幕中部”“底部按钮区域”等相对位置的操作。比例必须是 `0.0` 到 `1.0` 的有限数字：`0.0` 表示左/上边缘，`1.0` 会夹紧到最后一个有效坐标，避免越界。换算发生在每次调用时，因此会适应不同设备尺寸和当前横竖屏。
+
+```python
+size = client.screen_size()                 # {"width": 393.0, "height": 852.0}
+x, y = client.relative_point(0.5, 0.92)    # (196.5, 783.84)
+client.tap_relative(0.5, 0.92)             # 点击宽度 50%、高度 92% 的位置
+client.swipe_relative(0.5, 0.8, 0.5, 0.2)
+```
+
+高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。比例坐标基于设备的屏幕坐标系，不能把 OCR 返回的物理像素直接当成比例或绝对点击坐标。
+
 ### `swipe(x1, y1, x2, y2, *, duration_ms=200)`
 
 从起点滑动到终点。
@@ -609,7 +622,9 @@ py -m asclient --yes remove smoke
 | `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |
 | `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]` | 以前台方式同时管理 HTTP 与日志 USB `iproxy` 隧道；`--no-logs` 仅映射 HTTP |
 | `tap` | `--yes tap X Y [--duration MS]` | 坐标点击 |
+| `tap-rel` | `--yes tap-rel X_RATIO Y_RATIO [--duration MS]` | 按屏幕宽高比例点击，例如 `0.5 0.92` |
 | `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS]` | 坐标滑动 |
+| `swipe-rel` | `--yes swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]` | 按屏幕宽高比例滑动 |
 | `input` | `--yes input TEXT [--interval MS]` | 输入文本 |
 | `home` | `--yes home` | Home 动作 |
 | `ocr` | `ocr [rect]` | OCR |

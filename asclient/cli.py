@@ -63,6 +63,7 @@ _HELP: dict[str, tuple[str, str]] = {
     "deploy": ("deploy PROJECT ENTRY [--logs SECONDS]\n上传入口文件、运行项目、收集日志并保存截图。需要 --yes。", "deploy PROJECT ENTRY [--logs SECONDS]\nUpload an entry file, run the project, collect logs, and save a screenshot. Requires --yes."),
     "log": ("log [SECONDS]\n读取设备日志回显；USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS]\nRead device log output; USB mode requires tunnel to forward 10102."),
     "tap": ("tap X Y\n在真机坐标点击。需要 --yes。", "tap X Y\nTap a device coordinate. Requires --yes."),
+    "tap-rel": ("tap-rel X_RATIO Y_RATIO\n按屏幕宽高比例点击，例如 0.5 0.92。需要 --yes。", "tap-rel X_RATIO Y_RATIO\nTap using screen ratios, for example 0.5 0.92. Requires --yes."),
 }
 
 
@@ -96,7 +97,7 @@ def _print_help(topic: str | None = None) -> None:
   dump       保存 XML 控件树
   deploy     上传并运行项目，收集日志和截图（需要 --yes）
   log        查看日志回显
-  tap/swipe/input/home  执行设备操作（需要 --yes）
+  tap/tap-rel/swipe/input/home  执行设备操作（需要 --yes）
 
 查看某个命令的详细参数：py -m asclient help <命令>""")
     else:
@@ -115,7 +116,7 @@ Common commands:
   dump       Save the XML control tree
   deploy     Upload/run a project and collect logs/screenshots (requires --yes)
   log        Read log output
-  tap/swipe/input/home  Perform device actions (requires --yes)
+  tap/tap-rel/swipe/input/home  Perform device actions (requires --yes)
 
 View command details: py -m asclient help <command>""")
 
@@ -179,6 +180,8 @@ def _parser() -> argparse.ArgumentParser:
     log = commands.add_parser("log"); log.add_argument("seconds", nargs="?", type=float, default=3.0); log.add_argument("--reconnects", type=int, default=0); log.add_argument("--output"); log.add_argument("--contains")
     for name in ("tap", "swipe"):
         item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float); item.add_argument("--duration", type=int, default=20 if name == "tap" else 200)
+    for name in ("tap-rel", "swipe-rel"):
+        item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float); item.add_argument("--duration", type=int, default=20 if name == "tap-rel" else 200)
     inp = commands.add_parser("input"); inp.add_argument("text"); inp.add_argument("--interval", type=int, default=120)
     raw = commands.add_parser("api", help="call a confirmed but unwrapped API endpoint")
     raw.add_argument("method"); raw.add_argument("path"); raw.add_argument("--params", default="{}"); raw.add_argument("--form", default="{}")
@@ -277,10 +280,18 @@ def main(argv: list[str] | None = None) -> int:
             if len(args.coordinates) != 2: raise ValueError(t("tap_requires"))
             _confirm(args, client, t("action_tap", coordinates=args.coordinates))
             _out(client.tap(*args.coordinates, duration_ms=args.duration))
+        elif cmd == "tap-rel":
+            if len(args.coordinates) != 2: raise ValueError(t("tap_relative_requires"))
+            _confirm(args, client, t("action_tap_relative", coordinates=args.coordinates))
+            _out(client.tap_relative(*args.coordinates, duration_ms=args.duration))
         elif cmd == "swipe":
             if len(args.coordinates) != 4: raise ValueError(t("swipe_requires"))
             _confirm(args, client, t("action_swipe", coordinates=args.coordinates))
             _out(client.swipe(*args.coordinates, duration_ms=args.duration))
+        elif cmd == "swipe-rel":
+            if len(args.coordinates) != 4: raise ValueError(t("swipe_relative_requires"))
+            _confirm(args, client, t("action_swipe_relative", coordinates=args.coordinates))
+            _out(client.swipe_relative(*args.coordinates, duration_ms=args.duration))
         elif cmd == "input": _confirm(args, client, t("action_input")); _out(client.input_text(args.text, interval_ms=args.interval))
         elif cmd == "home": _confirm(args, client, t("action_home")); _out(client.home())
         elif cmd == "app": _out(client.current_app())

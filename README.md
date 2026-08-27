@@ -71,6 +71,9 @@ if confirm.exists:
 # 也支持稳定的显式选择器和坐标点探测。
 device.selector().name("login_button")
 device.selector().at(200, 600)
+
+# 也可按当前屏幕的宽高比例定位：屏幕中部偏下。
+device.click_rel(0.5, 0.92)
 ```
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：

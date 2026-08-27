@@ -84,6 +84,21 @@ class ClientTests(unittest.TestCase):
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
         self.assertIn(b"ascript.ios.action", call[3])
 
+    def test_relative_coordinates_scale_and_remain_in_screen_bounds(self):
+        original_json, original_tap = self.client.json, self.client.tap
+        self.client.json = lambda method, path, **kwargs: {"code": 1, "data": {"width": 393, "height": 852}} if path == "/api/screen/size" else original_json(method, path, **kwargs)
+        self.assertEqual(self.client.relative_point(0.5, 0.92), (196.5, 783.84))
+        self.assertEqual(self.client.relative_point(1, 1), (392.0, 851.0))
+        tapped = []
+        self.client.tap = lambda x, y, **kwargs: tapped.append((x, y, kwargs))
+        try:
+            Device(self.client).click_rel(0.5, 0.92, duration_ms=30)
+        finally:
+            self.client.json, self.client.tap = original_json, original_tap
+        self.assertEqual(tapped, [(196.5, 783.84, {"duration_ms": 30})])
+        with self.assertRaises(ValueError): self.client.relative_point(-0.1, 0.5)
+        with self.assertRaises(ValueError): self.client.relative_point(float("nan"), 0.5)
+
     def test_operation_error(self):
         with self.assertRaises(DeviceOperationError): self.client._ok({"code": -1, "msg": "bad request"})
 

@@ -143,6 +143,18 @@ class Device:
     def screenshot(self, destination: str | None = None) -> bytes | Any:
         return self.client.save_screenshot(destination) if destination else self.client.screenshot()
 
+    def click_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
+        """Click a point expressed as fractions of the current screen dimensions."""
+        return self.client.tap_relative(x_ratio, y_ratio, duration_ms=duration_ms)
+
+    def click_rel(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
+        """Short uiautomator2-style alias for :meth:`click_relative`."""
+        return self.click_relative(x_ratio, y_ratio, duration_ms=duration_ms)
+
+    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any:
+        """Swipe between two fractional screen coordinates."""
+        return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration_ms=duration_ms)
+
 
 @dataclass
 class UiCollection:

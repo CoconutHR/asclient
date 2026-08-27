@@ -191,11 +191,13 @@ node = device.find(device.selector().at(200, 600))
 ```python
 client.tap(200, 600)
 client.swipe(300, 700, 300, 250, duration_ms=350)
+client.tap_relative(0.5, 0.92)  # 宽度 50%、高度 92%，适合相对固定的底部区域
+client.swipe_relative(0.5, 0.8, 0.5, 0.2)
 client.input_text("hello", interval_ms=120)
 ocr_result = client.ocr()
 ```
 
-OCR 返回的坐标可能是物理像素，而节点树和 `tap` 通常使用 AScript 屏幕坐标。不要直接混用。应根据 `status().get("screen")`、截图尺寸及真机点击结果建立一次目标设备的坐标换算，并将换算封装在项目代码中。
+OCR 返回的坐标可能是物理像素，而节点树和 `tap` 通常使用 AScript 屏幕坐标。不要直接混用。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前 `screen_size()` 换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
 
 ## 6. Inspector 工作流
 

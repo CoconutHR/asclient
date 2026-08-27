@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import json
+import math
 import re
 import secrets
 import socket
@@ -266,8 +267,39 @@ class AScriptClient:
     def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
+    def screen_size(self) -> dict[str, float]:
+        """Return the current AScript coordinate-space width and height."""
+        value = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
+        try:
+            width, height = float(value["width"]), float(value["height"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DeviceResponseError(t("screen_size_invalid"), body=repr(value)) from exc
+        if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
+            raise DeviceResponseError(t("screen_size_invalid"), body=repr(value))
+        return {"width": width, "height": height}
+
+    def relative_point(self, x_ratio: float, y_ratio: float) -> tuple[float, float]:
+        """Convert two 0..1 ratios into current AScript screen coordinates."""
+        try:
+            x_ratio, y_ratio = float(x_ratio), float(y_ratio)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(t("relative_ratio_invalid")) from exc
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x_ratio, y_ratio)):
+            raise ValueError(t("relative_ratio_invalid"))
+        size = self.screen_size()
+        # Keep 1.0 within the valid final coordinate while retaining fractional points elsewhere.
+        return min(size["width"] - 1, size["width"] * x_ratio), min(size["height"] - 1, size["height"] * y_ratio)
+
+    def tap_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
+        """Tap a point expressed as fractions of the current screen dimensions."""
+        return self.tap(*self.relative_point(x_ratio, y_ratio), duration_ms=duration_ms)
+
     def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration_ms: int = 200) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import slide\nslide(%r, %r, %r, %r, %r)\n_result=True" % (x1, y1, x2, y2, duration_ms))
+
+    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any:
+        """Swipe between two points expressed as fractions of current screen dimensions."""
+        return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
     def input_text(self, text: str, *, interval_ms: int = 120) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import input\ninput(%s, %r)\n_result=True" % (json.dumps(text, ensure_ascii=False), interval_ms))
