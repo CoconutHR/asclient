@@ -328,6 +328,10 @@ class ClientTests(unittest.TestCase):
         self.assertIn("ASClient 使用帮助", stdout.getvalue())
         self.assertIn("doctor", stdout.getvalue())
 
+    def test_scan_command_is_removed(self):
+        with self.assertRaises(SystemExit):
+            main(["scan"])
+
     def test_doctor_can_write_only_a_validated_iproxy_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

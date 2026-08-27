@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import copy
-import ipaddress
 import json
 import math
 import re
@@ -199,36 +198,6 @@ class AScriptClient:
             "_result = json.dumps(sorted(_packages.items()))"
         )
         return value if isinstance(value, list) else []
-
-    def scan_subnet(self, *, workers: int = 64, probe_timeout: float = 1.0) -> list[tuple[DeviceAddress, str]]:
-        """Discover AScript devices on the current IPv4 /24 subnet.
-
-        Discovery is deliberately bounded to the local /24 and never probes
-        public ranges. It is unsuitable for IPv6 or non-/24 enterprise LANs.
-        """
-        try:
-            host = ipaddress.IPv4Address(self.address.host)
-        except ipaddress.AddressValueError as exc:
-            raise ValueError("scan requires an IPv4 device address as its subnet hint") from exc
-        network = ipaddress.IPv4Network(f"{host}/24", strict=False)
-        found: list[tuple[DeviceAddress, str]] = []
-        lock = threading.Lock()
-
-        def probe(ip: ipaddress.IPv4Address) -> None:
-            candidate = DeviceAddress(str(ip), self.address.port)
-            try:
-                platform = AScriptClient(candidate, password=self.password, timeout=probe_timeout, retries=0).ping()
-            except DeviceConnectionError:
-                return
-            with lock:
-                found.append((candidate, platform))
-
-        targets = list(network.hosts())
-        for offset in range(0, len(targets), workers):
-            batch = [threading.Thread(target=probe, args=(ip,), daemon=True) for ip in targets[offset:offset + workers]]
-            for thread in batch: thread.start()
-            for thread in batch: thread.join()
-        return sorted(found, key=lambda item: (int(ipaddress.IPv4Address(item[0].host)), item[0].port))
 
     def screenshot(self) -> bytes:
         """获取当前屏幕 PNG 字节，坐标尺寸与 ``tap`` 一致。"""

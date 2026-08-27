@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](quick-start.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。
 
-本文对应 ASClient `0.7.10`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.11`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -143,15 +143,6 @@ py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"
 ### 语言选择
 
 CLI 默认按操作系统语言输出：中文系统为中文，其他系统为英文。配置文件顶层可设置 `"language": "auto"`、`"zh-CN"` 或 `"en"`；单次命令可用 `--lang zh-CN` 或 `--lang en` 覆盖。运行 `py -m asclient help` 获取中文友好命令速查，`py -m asclient help doctor` 可查看单个命令。
-
-### `scan_subnet(*, workers=64, probe_timeout=1.0) -> list[tuple[DeviceAddress, str]]`
-
-在传入 IPv4 地址所在 `/24` 局域网内探测同端口设备。仅用于受控局域网的设备发现，不支持 IPv6 或任意 CIDR 扫描。
-
-```python
-for address, platform in client.scan_subnet():
-    print(address, platform)
-```
 
 ### `current_app() -> dict`
 
@@ -669,7 +660,6 @@ py -m asclient --yes remove smoke
 | `help` | `help [COMMAND]` | 输出当前语言下的简明说明，不连接设备 |
 | `doctor` | `doctor [--report FILE] [--fix-iproxy PATH] [--yes]` | 诊断本机工具、端口、设备与日志；仅对已验证的 `iproxy` 路径提供经确认的配置修复 |
 | `status` | `status` | 输出设备状态或兼容降级状态 |
-| `scan` | `scan` | 扫描默认地址所在 `/24` |
 | `pkgs` | `pkgs` | 列出设备 Python 包 |
 | `app` | `app` | 当前 App 信息 |
 | `shot` | `shot [output.png] [--crop-rel LEFT TOP RIGHT BOTTOM]` | 保存截图，可按比例裁剪 |
