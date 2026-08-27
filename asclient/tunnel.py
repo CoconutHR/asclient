@@ -103,6 +103,18 @@ class IProxyTunnel:
         try: process.wait(timeout=3)
         except subprocess.TimeoutExpired:
             process.kill(); process.wait(timeout=3)
+        self._wait_for_port_release()
+
+    def _wait_for_port_release(self, timeout: float = 2.0) -> None:
+        """Avoid a short OS socket-release race after stopping iproxy."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                    probe.bind((self.local_host, self.local_port))
+                return
+            except OSError:
+                time.sleep(0.05)
 
     def __enter__(self) -> "IProxyTunnel": return self.start()
 

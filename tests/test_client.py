@@ -207,6 +207,20 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             _stop_tunnel_on_sigterm(15, None)
 
+    def test_tunnel_stop_waits_for_local_port_release(self):
+        class Process:
+            def __init__(self): self.terminated = False
+            def poll(self): return None
+            def terminate(self): self.terminated = True
+            def wait(self, timeout): return 0
+        tunnel = AScriptTunnel(forward_logs=False).service
+        process = Process()
+        tunnel._process = process
+        with patch.object(tunnel, "_wait_for_port_release") as released:
+            tunnel.stop()
+        self.assertTrue(process.terminated)
+        released.assert_called_once_with()
+
     def test_cli_requires_yes_for_state_changes(self):
         stderr = StringIO()
         with redirect_stderr(stderr):
