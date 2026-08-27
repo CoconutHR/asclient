@@ -532,7 +532,7 @@ class ClientTests(unittest.TestCase):
         original = self.client.screenshot; calls = []
         self.client.screenshot = lambda: calls.append(1) or source.getvalue()
         try:
-            matches = self.client.find_images({"red": red_data.getvalue(), "blue": blue_data.getvalue()}, confidence=1, regions={"red": (0, 0, .5, .7), "blue": (.5, .5, 1, 1)})
+            matches = self.client.find_images({"red": red_data.getvalue(), "blue": blue_data.getvalue()}, confidence=1, regions_relative={"red": (0, 0, .5, .7), "blue": (.5, .5, 1, 1)})
             self.assertEqual((matches["red"].x, matches["red"].y), (2, 3))
             self.assertEqual((matches["blue"].x, matches["blue"].y), (11, 7))
             self.assertEqual(self.client.find_any_image({"blue": blue_data.getvalue(), "red": red_data.getvalue()}, confidence=1)[0], "blue")
@@ -648,6 +648,23 @@ class ClientTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.client.wait_image(needle.getvalue(), timeout=0, initial_delay=False, region=(0, 0, 1, 1), region_pixels=(0, 0, 8, 8))
         finally:
             self.client.screenshot = original
+
+    def test_image_region_uses_pixels_and_legacy_relative_inputs_warn(self):
+        from io import BytesIO
+        from PIL import Image
+        source = Image.new("RGB", (10, 10), "black"); template = Image.new("RGB", (2, 2), "red"); source.paste(template, (6, 6))
+        source_data, template_data = BytesIO(), BytesIO(); source.save(source_data, "PNG"); template.save(template_data, "PNG")
+        from asclient import ScreenFrame
+        frame = ScreenFrame(source_data.getvalue())
+        self.assertEqual((frame.find_image(template_data.getvalue(), confidence=1, region=(5, 5, 10, 10)).x, frame.find_image(template_data.getvalue(), confidence=1, region=(5, 5, 10, 10)).y), (6, 6))
+        self.assertEqual((frame.find_image(template_data.getvalue(), confidence=1, region_relative=(.5, .5, 1, 1)).x, frame.find_image(template_data.getvalue(), confidence=1, region_relative=(.5, .5, 1, 1)).y), (6, 6))
+        with self.assertWarns(DeprecationWarning):
+            self.assertIsNotNone(frame.find_image(template_data.getvalue(), confidence=1, region=(.5, .5, 1., 1.)))
+        with self.assertWarns(DeprecationWarning):
+            self.assertIsNotNone(frame.find_image(template_data.getvalue(), confidence=1, region_pixels=(5, 5, 10, 10)))
+        self.assertIsNone(frame.find_image(template_data.getvalue(), confidence=1, region=(0, 0, 1, 1)))
+        with self.assertRaises(ValueError):
+            frame.find_image(template_data.getvalue(), confidence=1, region=(5, 5, 10, 10), region_relative=(.5, .5, 1, 1))
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve

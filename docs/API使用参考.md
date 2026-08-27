@@ -220,7 +220,7 @@ colors = frame.pixels_relative([(0.1, 0.1), (0.9, 0.9)])
 
 在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有结果坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。
 
-单模板和所有图像等待/点击/滚动 API 都可用比例 `region=(left, top, right, bottom)` 或绝对物理像素 `region_pixels=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_pixels` 为按模板名称映射的同类区域；每张模板可有自己的小区域。
+单模板和所有图像等待/点击/滚动 API 都可用物理像素 `region=(left, top, right, bottom)` 或比例 `region_relative=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_relative` 为按模板名称映射的同类区域；每张模板可有自己的小区域。旧 `region_pixels` / `regions_pixels` 是物理像素弃用别名，会发出 `DeprecationWarning`。旧版比例 `region` 仅在包含非整数时暂时兼容并发出警告；尤其旧全屏写法 `region=(0, 0, 1, 1)` 必须改为 `region_relative=(0, 0, 1, 1)`，因为新规则下它表示 1×1 物理像素区域。
 
 ```python
 match = client.find_image("assets/login-icon.png", confidence=0.95)
@@ -228,13 +228,13 @@ if match:
     print(match.center)
 
 # 绝对物理像素区域：只搜索底部区域。
-match = client.find_image("assets/login-icon.png", region_pixels=(0, 1800, 1179, 2556))
+match = client.find_image("assets/login-icon.png", region=(0, 1800, 1179, 2556))
 
 # 一帧截图匹配多个模板；每个模板使用自己的比例检测区域。
 matches = client.find_images(
     {"success": "assets/success.png", "retry": "assets/retry.png"},
     confidence=0.95,
-    regions={"success": (0, 0.2, 1, 0.8), "retry": (0, 0.7, 1, 1)},
+    regions_relative={"success": (0, 0.2, 1, 0.8), "retry": (0, 0.7, 1, 1)},
 )
 
 # 等待成功页或错误页任一出现；返回 (名称, ImageMatch)。
@@ -262,7 +262,7 @@ client.tap_image("assets/continue.png", confidence=0.93, timeout=10)
 ```python
 target = client.scroll_until_image(
     "assets/target.png", direction="up", confidence=0.95, timeout=30, max_swipes=8,
-    region=(0, 0.15, 1, 0.95), log=True,
+    region_relative=(0, 0.15, 1, 0.95), log=True,
 )
 client.tap(*target.center)
 

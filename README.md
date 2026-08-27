@@ -141,7 +141,7 @@ device.tap(590, 2352)                       # 绝对物理像素
 device.click_rel(0.5, 0.92)                 # 比例坐标
 ```
 
-坐标规则统一如下：**无后缀方法一律使用截图物理像素绝对坐标**，例如 `tap(x, y)`、`swipe(...)`、`Selector.at(x, y)`、`pixel(x, y)`、`screenshot_crop(left, top, right, bottom)`；**`*_relative` 一律使用 `0..1` 比例坐标**，例如 `tap_relative()`、`Selector.at_relative()`、`pixel_relative()`、`screenshot_crop_relative()`。找图的比例区域为 `region` / `regions`，物理像素区域为 `region_pixels` / `regions_pixels`。所有矩形均为 `left, top, right, bottom`，左上包含、右下排除。控件树、截图、OCR 与 `tap`/`swipe` 使用物理像素（该设备为 `1179 x 2556`）；只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断使用。
+坐标规则统一如下：**无后缀方法一律使用截图物理像素绝对坐标**，例如 `tap(x, y)`、`swipe(...)`、`Selector.at(x, y)`、`pixel(x, y)`、`screenshot_crop(left, top, right, bottom)`；**`*_relative` 一律使用 `0..1` 比例坐标**，例如 `tap_relative()`、`Selector.at_relative()`、`pixel_relative()`、`screenshot_crop_relative()`。找图的物理像素区域为 `region` / `regions`，比例区域为 `region_relative` / `regions_relative`；旧 `region_pixels` / `regions_pixels` 是弃用别名。所有矩形均为 `left, top, right, bottom`，左上包含、右下排除。控件树、截图、OCR 与 `tap`/`swipe` 使用物理像素（该设备为 `1179 x 2556`）；只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断使用。
 
 截图支持比例裁剪，矩形采用 `left top right bottom`，范围为 `0..1`：
 

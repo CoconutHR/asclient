@@ -333,25 +333,25 @@ class AScriptClient:
         return destination.resolve()
 
     @staticmethod
-    def _image_match(image: bytes, template: str | Path | bytes, *, confidence: float, region: tuple[float, float, float, float] | None) -> ImageMatch | None:
-        return ScreenFrame(image).find_image(template, confidence=confidence, region=region)
+    def _image_match(image: bytes, template: str | Path | bytes, *, confidence: float, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
+        return ScreenFrame(image).find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
 
-    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
+    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
         """在当前截图中匹配一个本机模板。"""
-        return self.capture_frame().find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
+        return self.capture_frame().find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
 
-    def find_images(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> dict[str, ImageMatch | None]:
+    def find_images(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> dict[str, ImageMatch | None]:
         """在一张截图中匹配多个模板。"""
-        return self.capture_frame().find_images(dict(templates), confidence=confidence, regions=dict(regions or {}), regions_pixels=dict(regions_pixels or {}))
+        return self.capture_frame().find_images(dict(templates), confidence=confidence, regions=dict(regions or {}), regions_relative=dict(regions_relative or {}), regions_pixels=dict(regions_pixels or {}))
 
-    def find_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> tuple[str, ImageMatch] | None:
+    def find_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> tuple[str, ImageMatch] | None:
         """在一张截图中寻找任意模板，返回第一个命中的名称和结果。"""
-        for name, match in self.find_images(templates, confidence=confidence, regions=regions, regions_pixels=regions_pixels).items():
+        for name, match in self.find_images(templates, confidence=confidence, regions=regions, regions_relative=regions_relative, regions_pixels=regions_pixels).items():
             if match is not None:
                 return name, match
         return None
 
-    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """等待本机模板出现并返回 ``ImageMatch``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
@@ -359,7 +359,7 @@ class AScriptClient:
         attempt = 0
         while True:
             attempt += 1
-            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
+            match = self.find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
             if match is not None:
                 if log: print(t("image_wait_found", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))
                 return match
@@ -367,19 +367,19 @@ class AScriptClient:
             if time.monotonic() >= deadline: raise TimeoutError("image did not appear before timeout")
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def wait_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, regions: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None, initial_delay: bool = True) -> tuple[str, ImageMatch]:
+    def wait_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None, initial_delay: bool = True) -> tuple[str, ImageMatch]:
         """等待任意模板出现；每轮只抓取并解码一张截图。"""
         if not templates: raise ValueError("templates must not be empty")
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
         while True:
-            result = self.find_any_image(templates, confidence=confidence, regions=regions, regions_pixels=regions_pixels)
+            result = self.find_any_image(templates, confidence=confidence, regions=regions, regions_relative=regions_relative, regions_pixels=regions_pixels)
             if result is not None: return result
             if time.monotonic() >= deadline: raise TimeoutError(f"none of the images appeared before timeout: {', '.join(templates)}")
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
+    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, log: bool = False, initial_delay: bool = True) -> bool:
         """等待模板消失，成功返回 ``True``，超时返回 ``False``。"""
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout
@@ -387,7 +387,7 @@ class AScriptClient:
         attempt = 0
         while True:
             attempt += 1
-            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
+            match = self.find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
             if match is None:
                 if log: print(t("image_wait_gone", attempt=attempt))
                 return True
@@ -395,9 +395,9 @@ class AScriptClient:
             if time.monotonic() >= deadline: return False
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 20) -> ImageMatch:
+    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 20) -> ImageMatch:
         """等待模板出现后点击中心，``duration_ms`` 为点击持续毫秒数。"""
-        match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region, region_pixels=region_pixels)
+        match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region, region_relative=region_relative, region_pixels=region_pixels)
         self.tap(*match.center, duration_ms=duration_ms)
         return match
 
@@ -558,7 +558,7 @@ class AScriptClient:
         """Swipe between two points expressed as fractions of current screen dimensions."""
         return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
@@ -589,7 +589,7 @@ class AScriptClient:
         deadline = time.monotonic() + timeout
         if initial_delay: time.sleep(min(interval, timeout))
         for swipe_number in range(max_swipes + 1):
-            match = self.find_image(template, confidence=confidence, region=region, region_pixels=region_pixels)
+            match = self.find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
             attempt = swipe_number + 1
             if match is not None:
                 if log: print(t("image_scroll_match", attempt=attempt, x=match.x, y=match.y, confidence=match.confidence))
