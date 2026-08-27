@@ -225,6 +225,15 @@ class AScriptClient:
             raise DeviceResponseError("invalid PNG returned by screenshot endpoint")
         return {"width": size[0], "height": size[1]}
 
+    def screen_size(self) -> dict[str, float]:
+        """Return the current physical screen resolution used for actions.
+
+        This is the same coordinate system as screenshots, OCR, ``tap`` and
+        ``swipe``.  Use :meth:`logical_size` only when handling raw view-tree
+        rectangles.
+        """
+        return self.action_size()
+
     def save_screenshot(self, destination: str | Path) -> Path:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -290,8 +299,12 @@ class AScriptClient:
     def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
-    def screen_size(self) -> dict[str, float]:
-        """Return the iOS logical-point width and height reported by AScript."""
+    def logical_size(self) -> dict[str, float]:
+        """Return the iOS logical-point dimensions reported by AScript.
+
+        This low-level size is normally only useful for interpreting raw
+        ``ui_tree`` element rectangles.
+        """
         value = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
         try:
             width, height = float(value["width"]), float(value["height"])

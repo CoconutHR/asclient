@@ -145,13 +145,13 @@ class Device:
                 return width, height
         except (AttributeError, TypeError, ValueError):
             pass
-        logical = self.client.screen_size()
+        logical = self.client.logical_size()
         return logical["width"], logical["height"]
 
     def tree_to_action_point(self, x: float, y: float, *, tree_size: tuple[float, float] | None = None) -> tuple[float, float]:
         """Map a view-tree point into physical action coordinates."""
         if tree_size is None:
-            logical = self.client.screen_size()
+            logical = self.client.logical_size()
             tree_size = logical["width"], logical["height"]
         tree_width, tree_height = tree_size
         if tree_width <= 0 or tree_height <= 0:

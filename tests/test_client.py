@@ -89,6 +89,8 @@ class ClientTests(unittest.TestCase):
         self.client.json = lambda method, path, **kwargs: {"code": 1, "data": {"width": 393, "height": 852}} if path == "/api/screen/size" else original_json(method, path, **kwargs)
         try:
             self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1179).to_bytes(4, "big") + (2556).to_bytes(4, "big")
+            self.assertEqual(self.client.screen_size(), {"width": 1179.0, "height": 2556.0})
+            self.assertEqual(self.client.logical_size(), {"width": 393.0, "height": 852.0})
             self.assertEqual(self.client.relative_point(0.5, 0.92), (589.5, 2351.52))
             self.assertEqual(self.client.relative_point(1, 1), (1178.0, 2555.0))
             tapped = []
