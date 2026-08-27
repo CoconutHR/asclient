@@ -106,11 +106,13 @@ class UiObject:
     @property
     def exists(self) -> bool: return True
 
-    def click(self) -> Any:
+    def click(self, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
         rect = self.rect
         if rect["width"] <= 0 or rect["height"] <= 0: raise ValueError("element has an empty rectangle")
-        return self.device.client.tap(*self.center)
-    def click_relative(self, x_ratio: float, y_ratio: float) -> Any:
+        return self.device.client.tap(*self.center, duration=duration, duration_ms=duration_ms)
+    def long_click(self, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.device.client.long_press(*self.center, duration=duration, duration_ms=duration_ms)
+    def double_click(self, *, duration: float | None = None, duration_ms: int | None = None, interval: float = 0.08) -> Any: return self.device.client.double_tap(*self.center, duration=duration, duration_ms=duration_ms, interval=interval)
+    def click_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
         try: x_ratio, y_ratio = float(x_ratio), float(y_ratio)
         except (TypeError, ValueError) as exc: raise ValueError("element relative coordinates must be finite numbers between 0 and 1") from exc
         if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x_ratio, y_ratio)):
@@ -119,7 +121,11 @@ class UiObject:
         if rect["width"] <= 0 or rect["height"] <= 0: raise ValueError("element has an empty rectangle")
         x = min(rect["x"] + rect["width"] - 1, rect["x"] + rect["width"] * x_ratio)
         y = min(rect["y"] + rect["height"] - 1, rect["y"] + rect["height"] * y_ratio)
-        return self.device.client.tap(x, y)
+        return self.device.client.tap(x, y, duration=duration, duration_ms=duration_ms)
+    def drag_to(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        return self.device.client.drag(*self.center, x, y, duration=duration, duration_ms=duration_ms)
+    def drag_to_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        return self.device.client.drag(*self.center, *self.device.client.relative_point(x_ratio, y_ratio), duration=duration, duration_ms=duration_ms)
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any:
         self.click()
         return self.device.client.input_text(text, interval_ms=interval_ms)
@@ -152,7 +158,11 @@ class SnapshotNode:
     def rect(self) -> dict[str, float]: return self.object.rect
     @property
     def center(self) -> tuple[float, float]: return self.object.center
-    def click(self) -> Any: return self.object.click()
+    def click(self, **kwargs: Any) -> Any: return self.object.click(**kwargs)
+    def long_click(self, **kwargs: Any) -> Any: return self.object.long_click(**kwargs)
+    def double_click(self, **kwargs: Any) -> Any: return self.object.double_click(**kwargs)
+    def drag_to(self, x: float, y: float, **kwargs: Any) -> Any: return self.object.drag_to(x, y, **kwargs)
+    def drag_to_relative(self, x_ratio: float, y_ratio: float, **kwargs: Any) -> Any: return self.object.drag_to_relative(x_ratio, y_ratio, **kwargs)
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any: return self.object.set_text(text, interval_ms=interval_ms)
 
 
@@ -282,22 +292,50 @@ class Device:
             if time.monotonic() >= deadline: raise LookupError(f"none of the elements appeared within {timeout}s: {', '.join(selectors)}")
             time.sleep(min(interval, deadline - time.monotonic()))
     def wait_gone(self, selector: Selector, *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> bool: return UiCollection(self, selector).wait_gone(timeout=timeout, interval=interval, log=log)
+    def wait_current_app(self, expected: Any, *, timeout: float = 10.0, interval: float = 0.3) -> Mapping[str, Any]: return self.client.wait_current_app(expected, timeout=timeout, interval=interval)
+    def click_if_unique(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, duration: float | None = None, duration_ms: int | None = None) -> UiObject:
+        deadline = time.monotonic() + timeout
+        with self.client.locked():
+            while True:
+                matches = self.find_all(selector)
+                if len(matches) == 1:
+                    matches[0].click(duration=duration, duration_ms=duration_ms)
+                    return matches[0]
+                if time.monotonic() >= deadline:
+                    raise LookupError(f"selector matched {len(matches)} elements within {timeout}s: {selector.code()}")
+                time.sleep(min(interval, deadline - time.monotonic()))
     def dump_hierarchy(self, *, mode: str = "smart") -> str: return self.client.ui_xml(mode=mode)
     def screenshot(self, destination: str | None = None) -> bytes | Any: return self.client.save_screenshot(destination) if destination else self.client.screenshot()
     def screenshot_crop(self, left: int, top: int, right: int, bottom: int) -> bytes: return self.client.screenshot_crop(left, top, right, bottom)
     def screenshot_crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes: return self.client.screenshot_crop_relative(left, top, right, bottom)
     def save_screenshot_crop(self, destination: str | Path, left: int, top: int, right: int, bottom: int) -> Path: return self.client.save_screenshot_crop(destination, left, top, right, bottom)
     def save_screenshot_crop_relative(self, destination: str | Path, left: float, top: float, right: float, bottom: float) -> Path: return self.client.save_screenshot_crop_relative(destination, left, top, right, bottom)
-    def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any: return self.client.tap(x, y, duration_ms=duration_ms)
-    def click_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any: return self.client.tap_relative(x_ratio, y_ratio, duration_ms=duration_ms)
-    def click_rel(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any: return self.click_relative(x_ratio, y_ratio, duration_ms=duration_ms)
-    def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration_ms: int = 200) -> Any: return self.client.swipe(x1, y1, x2, y2, duration_ms=duration_ms)
-    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any: return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration_ms=duration_ms)
+    def tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.tap(x, y, duration=duration, duration_ms=duration_ms)
+    def click_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.tap_relative(x_ratio, y_ratio, duration=duration, duration_ms=duration_ms)
+    def click_rel(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.click_relative(x_ratio, y_ratio, duration=duration, duration_ms=duration_ms)
+    def long_press(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.long_press(x, y, duration=duration, duration_ms=duration_ms)
+    def long_press_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.long_press_relative(x_ratio, y_ratio, duration=duration, duration_ms=duration_ms)
+    def double_tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None, interval: float = 0.08) -> Any: return self.client.double_tap(x, y, duration=duration, duration_ms=duration_ms, interval=interval)
+    def double_tap_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None, interval: float = 0.08) -> Any: return self.client.double_tap_relative(x_ratio, y_ratio, duration=duration, duration_ms=duration_ms, interval=interval)
+    def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.swipe(x1, y1, x2, y2, duration=duration, duration_ms=duration_ms)
+    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.swipe_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration=duration, duration_ms=duration_ms)
+    def drag(self, x1: float, y1: float, x2: float, y2: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.drag(x1, y1, x2, y2, duration=duration, duration_ms=duration_ms)
+    def drag_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any: return self.client.drag_relative(x1_ratio, y1_ratio, x2_ratio, y2_ratio, duration=duration, duration_ms=duration_ms)
     def capture_frame(self) -> Any: return self.client.capture_frame()
     def pixel(self, x: int, y: int) -> Any: return self.client.pixel(x, y)
     def pixel_relative(self, x_ratio: float, y_ratio: float) -> Any: return self.client.pixel_relative(x_ratio, y_ratio)
     def pixels(self, points: Any) -> Any: return self.client.pixels(points)
     def pixels_relative(self, points: Any) -> Any: return self.client.pixels_relative(points)
+    def ocr(self, **kwargs: Any) -> Any: return self.client.ocr(**kwargs)
+    def ocr_raw(self, **kwargs: Any) -> Any: return self.client.ocr_raw(**kwargs)
+    def find_ocr_text(self, text: str, **kwargs: Any) -> Any: return self.client.find_ocr_text(text, **kwargs)
+    def wait_ocr_text(self, text: str, **kwargs: Any) -> Any: return self.client.wait_ocr_text(text, **kwargs)
+    def color_matches(self, x: int, y: int, expected: Any, **kwargs: Any) -> bool: return self.client.color_matches(x, y, expected, **kwargs)
+    def color_matches_relative(self, x_ratio: float, y_ratio: float, expected: Any, **kwargs: Any) -> bool: return self.client.color_matches_relative(x_ratio, y_ratio, expected, **kwargs)
+    def find_color(self, expected: Any, **kwargs: Any) -> Any: return self.client.find_color(expected, **kwargs)
+    def count_color(self, expected: Any, **kwargs: Any) -> int: return self.client.count_color(expected, **kwargs)
+    def assert_color(self, x: int, y: int, expected: Any, **kwargs: Any) -> Any: return self.client.assert_color(x, y, expected, **kwargs)
+    def assert_color_relative(self, x_ratio: float, y_ratio: float, expected: Any, **kwargs: Any) -> Any: return self.client.assert_color_relative(x_ratio, y_ratio, expected, **kwargs)
     def scroll_until_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.scroll_until_image(template, **kwargs)
     def find_image(self, template: str | Path | bytes, **kwargs: Any) -> Any: return self.client.find_image(template, **kwargs)
     def find_images(self, templates: Mapping[str, str | Path | bytes], **kwargs: Any) -> Any: return self.client.find_images(templates, **kwargs)
@@ -346,10 +384,10 @@ class UiCollection:
             if log: print(t("selector_wait_present", attempt=attempt, selector=self.selector.code()))
             if time.monotonic() >= deadline: return False
             time.sleep(min(interval, deadline - time.monotonic()))
-    def click(self) -> Any:
+    def click(self, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
-        return item.click()
+        return item.click(duration=duration, duration_ms=duration_ms)
     def click_exists(self, *, timeout: float = 0) -> bool:
         item = self.get(timeout=timeout)
         if item is None: return False

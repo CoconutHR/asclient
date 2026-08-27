@@ -666,6 +666,73 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             frame.find_image(template_data.getvalue(), confidence=1, region=(5, 5, 10, 10), region_relative=(.5, .5, 1, 1))
 
+    def test_duration_seconds_and_milliseconds_normalize_without_conflicts(self):
+        self.assertEqual(self.client._duration_ms(.65, None, default_ms=20), 650)
+        self.assertEqual(self.client._duration_ms(None, 650, default_ms=20), 650)
+        self.assertEqual(self.client._duration_ms(None, None, default_ms=20), 20)
+        with self.assertRaises(ValueError): self.client._duration_ms(.1, 100, default_ms=20)
+        with self.assertRaises(ValueError): self.client._duration_ms(-.1, None, default_ms=20)
+        calls = []; original = self.client.eval_python
+        self.client.eval_python = lambda code, **kwargs: calls.append(code) or True
+        try:
+            self.client.tap(1, 2, duration=.65)
+            self.client.drag(1, 2, 3, 4, duration=.5)
+        finally:
+            self.client.eval_python = original
+        self.assertIn("click(1, 2, 650)", calls[0])
+        self.assertIn("slide(1, 2, 3, 4, 500)", calls[1])
+
+    def test_pixel_color_parsing_and_region_assertions(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import PixelColor, ScreenFrame
+        self.assertEqual(PixelColor.parse("#0C2238").rgb, (12, 34, 56))
+        self.assertEqual(PixelColor.parse("#0C22384E").rgba, (12, 34, 56, 78))
+        self.assertEqual(PixelColor.parse((12, 34, 56)).hex, "#0C2238")
+        image = Image.new("RGBA", (4, 4), (12, 34, 56, 255)); data = BytesIO(); image.save(data, "PNG"); frame = ScreenFrame(data.getvalue())
+        self.assertTrue(frame.color_matches(0, 0, "#0C2238"))
+        self.assertTrue(frame.color_matches(0, 0, (13, 35, 57), tolerance=1))
+        self.assertEqual(frame.find_color("#0C2238", region=(0, 0, 4, 4)), (0, 0))
+        self.assertEqual(frame.count_color("#0C2238", region_relative=(0, 0, 1, 1)), 16)
+        self.assertEqual(frame.assert_color(0, 0, PixelColor(12, 34, 56)).hex, "#0C2238")
+
+    def test_structured_ocr_and_current_app_wait(self):
+        original_gp, original_app = self.client.gp, self.client.current_app
+        payload = {"data": [{"text": "登录", "rect": [10, 20, 30, 40], "confidence": .9}]}
+        self.client.gp = lambda *args, **kwargs: json.dumps(payload)
+        self.client.current_app = lambda: {"bundle_id": "com.example.app"}
+        try:
+            result = self.client.ocr()
+            self.assertEqual(result.items[0].text, "登录")
+            self.assertEqual(result.items[0].rect, (10, 20, 30, 40))
+            self.assertEqual(self.client.find_ocr_text("登录")[0].confidence, .9)
+            self.assertEqual(self.client.wait_current_app("com.example.app")["bundle_id"], "com.example.app")
+        finally:
+            self.client.gp, self.client.current_app = original_gp, original_app
+
+    def test_click_if_unique_is_atomic_and_reports_nonunique(self):
+        device = Device(self.client); original_find = device.find_all; clicks = []
+        button = UiObject(device, {"x": 10, "y": 20, "width": 30, "height": 40}, device.selector().name("submit"))
+        original_tap = self.client.tap; self.client.tap = lambda *args, **kwargs: clicks.append((args, kwargs))
+        try:
+            device.find_all = lambda selector: [button]
+            self.assertIs(device.click_if_unique(device.selector().name("submit")), button)
+            self.assertEqual(clicks[0][0], (25.0, 40.0))
+            device.find_all = lambda selector: [button, button]
+            with self.assertRaises(LookupError): device.click_if_unique(device.selector().name("submit"))
+        finally:
+            device.find_all, self.client.tap = original_find, original_tap
+
+    def test_cli_duration_units_preserve_milliseconds_and_accept_seconds(self):
+        from asclient.cli import _parser
+        old = _parser().parse_args(["tap", "1", "2", "--duration", "450"])
+        explicit_ms = _parser().parse_args(["tap", "1", "2", "--duration-ms", "450"])
+        seconds = _parser().parse_args(["tap", "1", "2", "--duration-s", ".45"])
+        self.assertEqual((old.duration, old.duration_ms, old.duration_s), (450, None, None))
+        self.assertEqual((explicit_ms.duration, explicit_ms.duration_ms, explicit_ms.duration_s), (None, 450, None))
+        self.assertEqual((seconds.duration, seconds.duration_ms, seconds.duration_s), (None, None, .45))
+        with self.assertRaises(SystemExit): _parser().parse_args(["tap", "1", "2", "--duration", "450", "--duration-s", ".45"])
+
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve
         server = serve(self.client, open_browser=False)

@@ -267,7 +267,7 @@ target = client.scroll_until_image(
 client.tap(*target.center)
 
 # 自定义从 70%,75% 滑到 35%,25%，每次 650 ms。
-client.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration_ms=650)
+client.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration=0.65)
 ```
 
 模板匹配依赖 Pillow，随 `asclient` 一起安装。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
@@ -542,19 +542,38 @@ with Run(device, artifacts_root="artifacts") as run:
 
 ## 7. 交互动作与设备端代码
 
-### `tap(x, y, *, duration_ms=20)`
+### 高频交互与前台 App 等待
+
+所有 Python 动作的 `duration` 单位为秒；`duration_ms` 是兼容毫秒参数，二者不能同时传入。未传时保留原动作默认值。
+
+```python
+client.long_press(600, 1200, duration=0.8)
+client.double_tap_relative(0.5, 0.5, duration=0.02)
+client.drag_relative(0.2, 0.5, 0.8, 0.5, duration=0.5)
+
+# 等待目标 App 成为前台。
+client.wait_current_app("com.example.app", timeout=10)
+```
+
+`UiObject`/`SnapshotNode` 提供 `.long_click()`、`.double_click()`、`.drag_to()`、`.drag_to_relative()`；`Device` 提供上述低层绝对和比例动作门面。`device.click_if_unique(selector)` 在同一设备锁内查询 selector、断言恰好一个匹配并立即点击，适合避免“先查后点”期间页面变化的常见竞态。
+
+### 动作时长
+
+Python 动作 API 的 `duration` 单位为**秒**，例如 `duration=0.35`；`duration_ms` 是兼容的毫秒参数。两者不能同时传入，均未传时保留原动作默认值。`timeout`、`interval`、`duration` 均为秒；只有带 `_ms` 后缀的参数才是毫秒。
+
+### `tap(x, y, *, duration=None, duration_ms=None)`
 
 点击物理像素动作坐标。它与 `screen_size()`、截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的“动作坐标”取得准确数值。
 
 ```python
-client.tap(200, 600)
+client.tap(200, 600, duration=0.02)
 ```
 
 ### `screen_size()`、`action_size()`、`relative_point()` 与 `tap_relative()`
 
 `screen_size()` 返回当前真实物理分辨率，且与 `action_size()` 同义；两者都读取当前 PNG 截图头。以 iPhone 393 x 852 点、3 倍截图为例，返回 `1179 x 2556`。`tap`、`swipe`、截图、OCR 与 Inspector 的“动作坐标”都使用物理像素。
 
-客户端对控件树的 `x/y/width/height`、`ui_tree(..., x, y)` 点探测参数和 XML 坐标也统一使用物理像素，`UiObject.click()` 因而可直接使用控件中心点。只有 `status()["logical_screen"]` 显式保留服务端返回的逻辑点尺寸，用于诊断移动端协议。
+客户端对控件树的 `x/y/width/height`、`ui_tree(..., x, y)` 点探测参数和 XML 坐标也统一使用物理像素，`ui_tree()` 在接收树时已完成逻辑点到物理像素的归一化，`UiObject.click()` 可直接使用控件中心点。只有 `status()["logical_screen"]` 显式保留服务端返回的逻辑点尺寸，用于诊断移动端协议。
 
 比例 API 始终依据 `action_size()` 换算，适合固定在“屏幕中部”“底部按钮区域”等相对位置的操作。比例必须是 `0.0` 到 `1.0` 的有限数字：`0.0` 表示左/上边缘，`1.0` 会夹紧到最后一个有效像素，避免越界。换算发生在每次调用时，因此会适应不同设备尺寸和当前横竖屏。`UiObject.click()` 同样会将控件树的逻辑点自动换算为动作像素。
 
@@ -567,12 +586,12 @@ client.swipe_relative(0.5, 0.8, 0.5, 0.2)
 
 高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。控件树的 `x/y/width/height` 可直接用于同一物理像素坐标系内的绝对动作。
 
-### `swipe(x1, y1, x2, y2, *, duration_ms=200)`
+### `swipe(x1, y1, x2, y2, *, duration=None, duration_ms=None)`
 
 从起点滑动到终点。
 
 ```python
-client.swipe(200, 700, 200, 250, duration_ms=350)
+client.swipe(200, 700, 200, 250, duration=0.35)
 ```
 
 ### `input_text(text, *, interval_ms=120)`
@@ -596,14 +615,32 @@ assert result == 2
 
 ## 8. OCR 与图色 API
 
-### `ocr(rect=None) -> Any`
+### `ocr_raw()`、`ocr()`、`find_ocr_text()` 与 `wait_ocr_text()`
 
-执行设备端 OCR。`rect` 为设备端图色参数格式，不是 Python 元组。
+`ocr_raw()` 返回设备端原始 OCR 载荷。`ocr()` 返回 `OcrResult(items, raw)`；每个 `OcrItem` 提供 `text`、`confidence`、物理像素 `rect=(left, top, right, bottom)` 和 `raw`。真机 AScript 4001 已验证 `rect`、`center_x/y`、`confidence` 与 `text` 字段。
 
 ```python
-result = client.ocr()
-for item in result.get("data", []):
-    print(item["text"], item["rect"], item["confidence"])
+result = client.ocr(region=(0, 300, 1179, 1800))
+for item in result.items:
+    print(item.text, item.rect, item.confidence)
+
+login = client.wait_ocr_text("登录", timeout=10)
+```
+
+OCR 区域遵循统一规则：`region` 是物理像素，`region_relative` 是比例区域。
+
+### 本机颜色 API
+
+颜色输入统一接受 `PixelColor`、`(r, g, b)`、`(r, g, b, a)`、`"#RRGGBB"` 或 `"#RRGGBBAA"`；返回统一为 `PixelColor`，使用 `.rgb`、`.rgba`、`.hex` 取得视图。默认比较 RGB，每通道容差由 `tolerance` 指定；`include_alpha=True` 才比较 alpha。
+
+```python
+assert client.color_matches(100, 200, "#FFFFFF", tolerance=3)
+assert client.color_matches_relative(0.5, 0.92, (255, 255, 255))
+
+frame = client.capture_frame()
+point = frame.find_color("#FF0000", region=(0, 1800, 1179, 2556))
+count = frame.count_color((255, 255, 255), region_relative=(0, 0.7, 1, 1))
+frame.assert_color(100, 200, "#FFFFFF")
 ```
 
 ### `find_colors(colors, *, diff=0.98) -> Any`
@@ -771,10 +808,10 @@ py -m asclient remove smoke --yes
 | `observe` | `observe [--prefix PREFIX]` | 同时保存截图与 XML |
 | `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |
 | `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]` | 以前台方式同时管理 HTTP 与日志 USB `iproxy` 隧道；`--no-logs` 仅映射 HTTP |
-| `tap` | `--yes tap X Y [--duration MS]` | 坐标点击 |
-| `tap-rel` | `--yes tap-rel X_RATIO Y_RATIO [--duration MS]` | 按屏幕宽高比例点击，例如 `0.5 0.92` |
-| `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS]` | 坐标滑动 |
-| `swipe-rel` | `--yes swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]` | 按屏幕宽高比例滑动 |
+| `tap` | `--yes tap X Y [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 坐标点击；旧 `--duration` 保持毫秒兼容 |
+| `tap-rel` | `--yes tap-rel X_RATIO Y_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 按屏幕宽高比例点击 |
+| `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 坐标滑动 |
+| `swipe-rel` | `--yes swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 按屏幕宽高比例滑动 |
 | `input` | `--yes input TEXT [--interval MS]` | 输入文本 |
 | `home` | `--yes home` | Home 动作 |
 | `ocr` | `ocr [rect]` | OCR |

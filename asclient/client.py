@@ -17,7 +17,7 @@ import urllib.request
 import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, ProtocolError
 from .i18n import t
@@ -67,6 +67,20 @@ class ImageMatch:
     @property
     def center(self) -> tuple[float, float]:
         return self.x + self.width / 2, self.y + self.height / 2
+
+
+@dataclass(frozen=True)
+class OcrItem:
+    text: str
+    rect: tuple[int, int, int, int] | None
+    confidence: float | None
+    raw: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class OcrResult:
+    items: tuple[OcrItem, ...]
+    raw: Any
 
 
 class AScriptClient:
@@ -395,10 +409,10 @@ class AScriptClient:
             if time.monotonic() >= deadline: return False
             time.sleep(min(interval, deadline - time.monotonic()))
 
-    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 20) -> ImageMatch:
+    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration: float | None = None, duration_ms: int | None = None) -> ImageMatch:
         """等待模板出现后点击中心，``duration_ms`` 为点击持续毫秒数。"""
         match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region, region_relative=region_relative, region_pixels=region_pixels)
-        self.tap(*match.center, duration_ms=duration_ms)
+        self.tap(*match.center, duration=duration, duration_ms=duration_ms)
         return match
 
     def capture_artifacts(self, destination: str | Path, *, prefix: str = "failure", mode: str = "smart") -> dict[str, Path]:
@@ -462,8 +476,30 @@ class AScriptClient:
             raise DeviceResponseError("invalid element list returned by device", body=repr(views))
         return [dict(view) for view in views if isinstance(view, Mapping)]
 
+    @staticmethod
+    def _duration_ms(duration: float | None, duration_ms: int | None, *, default_ms: int) -> int:
+        if duration is not None and duration_ms is not None: raise ValueError("duration and duration_ms cannot be combined")
+        if duration is not None:
+            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0: raise ValueError("duration must be a finite non-negative number of seconds")
+            return int(round(duration * 1000))
+        if duration_ms is not None:
+            if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms < 0: raise ValueError("duration_ms must be a non-negative integer")
+            return duration_ms
+        return default_ms
+
     def current_app(self) -> dict[str, Any]:
         return self._ok(self.json("GET", "/api/node/package")).get("data", {})
+
+    def wait_current_app(self, expected: str | Callable[[Mapping[str, Any]], bool], *, timeout: float = 10.0, interval: float = 0.3) -> dict[str, Any]:
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        matcher = (lambda app: app.get("bundle_id") == expected) if isinstance(expected, str) else expected
+        if not callable(matcher): raise ValueError("expected must be a bundle id or callable")
+        deadline = time.monotonic() + timeout
+        while True:
+            app = self.current_app()
+            if matcher(app): return app
+            if time.monotonic() >= deadline: raise LookupError(f"foreground app did not match within {timeout}s")
+            time.sleep(min(interval, deadline - time.monotonic()))
 
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
@@ -476,9 +512,22 @@ class AScriptClient:
                 return value
         return value
 
-    def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
-        """点击物理像素 ``x/y``；``duration_ms`` 单位毫秒。"""
-        with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
+    def tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """点击物理像素 ``x/y``；``duration`` 单位秒。"""
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=20)
+        with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, milliseconds))
+
+    def long_press(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """在物理像素 ``x/y`` 长按；默认 0.8 秒。"""
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=800)
+        return self.tap(x, y, duration_ms=milliseconds)
+
+    def double_tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None, interval: float = 0.08) -> Any:
+        """在物理像素 ``x/y`` 连续点击两次。"""
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=20)
+        if not math.isfinite(interval) or interval < 0: raise ValueError("interval must be a finite non-negative number of seconds")
+        self.tap(x, y, duration_ms=milliseconds); time.sleep(interval)
+        return self.tap(x, y, duration_ms=milliseconds)
 
     def _logical_screen(self) -> dict[str, float]:
         value = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
@@ -547,18 +596,33 @@ class AScriptClient:
         # Keep 1.0 within the valid final coordinate while retaining fractional points elsewhere.
         return min(size["width"] - 1, size["width"] * x_ratio), min(size["height"] - 1, size["height"] * y_ratio)
 
-    def tap_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any:
-        """Tap a point expressed as fractions of the current screen dimensions."""
-        return self.tap(*self.relative_point(x_ratio, y_ratio), duration_ms=duration_ms)
+    def tap_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """按屏幕比例点击；``duration`` 单位秒。"""
+        return self.tap(*self.relative_point(x_ratio, y_ratio), **({"duration": duration} if duration is not None else {"duration_ms": duration_ms} if duration_ms is not None else {}))
 
-    def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration_ms: int = 200) -> Any:
-        with self.locked(): return self.eval_python("from ascript.ios.action import slide\nslide(%r, %r, %r, %r, %r)\n_result=True" % (x1, y1, x2, y2, duration_ms))
+    def long_press_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        return self.long_press(*self.relative_point(x_ratio, y_ratio), duration=duration, duration_ms=duration_ms)
 
-    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration_ms: int = 200) -> Any:
-        """Swipe between two points expressed as fractions of current screen dimensions."""
-        return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
+    def double_tap_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None, interval: float = 0.08) -> Any:
+        return self.double_tap(*self.relative_point(x_ratio, y_ratio), duration=duration, duration_ms=duration_ms, interval=interval)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration_ms: int = 300, log: bool = False, initial_delay: bool = True) -> ImageMatch:
+    def swipe(self, x1: float, y1: float, x2: float, y2: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=200)
+        with self.locked(): return self.eval_python("from ascript.ios.action import slide\nslide(%r, %r, %r, %r, %r)\n_result=True" % (x1, y1, x2, y2, milliseconds))
+
+    def drag(self, x1: float, y1: float, x2: float, y2: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """从一个物理像素点拖拽到另一个点；默认 0.5 秒。"""
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=500)
+        return self.swipe(x1, y1, x2, y2, duration_ms=milliseconds)
+
+    def swipe_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """按屏幕比例滑动；``duration`` 单位秒。"""
+        return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration=duration, duration_ms=duration_ms)
+
+    def drag_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        return self.drag(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration=duration, duration_ms=duration_ms)
+
+    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None, duration: float | None = None, duration_ms: int | None = None, log: bool = False, initial_delay: bool = True) -> ImageMatch:
         """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
@@ -598,7 +662,7 @@ class AScriptClient:
                 if log: print(t("image_scroll_stop", attempt=attempt))
                 break
             if log: print(t("image_scroll_next", attempt=attempt))
-            self.swipe_relative(x1, y1, x2, y2, duration_ms=duration_ms)
+            self.swipe_relative(x1, y1, x2, y2, **({"duration": duration} if duration is not None else {"duration_ms": duration_ms} if duration_ms is not None else {}))
             time.sleep(min(interval, max(0, deadline - time.monotonic())))
         raise TimeoutError(f"image did not appear after {max_swipes} {direction} swipes or before timeout")
 
@@ -619,8 +683,61 @@ class AScriptClient:
         track = [{"id": class_id, "type": "图色工具", "data": {"params": params}}]
         return self._ok(self.json("POST", "/api/screen/gp", form={"strack": json.dumps(track, ensure_ascii=False), "image": image or self._device_screenshot_path(), "gp": name}, timeout=60)).get("data")
 
-    def ocr(self, rect: Optional[str] = None) -> Any:
+    def ocr_raw(self, *, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> Any:
+        if region is not None and region_relative is not None: raise ValueError("region and region_relative cannot be combined")
+        if region_relative is not None:
+            frame = self.capture_frame(); left, top, right, bottom = frame._region(None, region_relative, None); region = (left, top, right, bottom)
+        rect = "|".join(str(value) for value in region) if region else None
         return self.gp("ascript.ios.screen.Ocr", "mode=5, confidence=0.1" + (f", rect=[{rect}]" if rect else ""))
+
+    def ocr(self, *, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> OcrResult:
+        raw = self.ocr_raw(region=region, region_relative=region_relative)
+        try: payload = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError: payload = raw
+        entries = payload.get("data", []) if isinstance(payload, Mapping) else payload if isinstance(payload, list) else []
+        items: list[OcrItem] = []
+        for entry in entries:
+            if not isinstance(entry, Mapping): continue
+            rect_value = entry.get("rect")
+            rect = tuple(int(value) for value in rect_value) if isinstance(rect_value, list) and len(rect_value) == 4 else None
+            confidence = float(entry["confidence"]) if isinstance(entry.get("confidence"), (int, float)) else None
+            items.append(OcrItem(str(entry.get("text") or ""), rect, confidence, dict(entry)))
+        return OcrResult(tuple(items), payload)
+
+    def find_ocr_text(self, text: str, *, contains: bool = True, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> list[OcrItem]:
+        return [item for item in self.ocr(region=region, region_relative=region_relative).items if text in item.text if contains] if contains else [item for item in self.ocr(region=region, region_relative=region_relative).items if item.text == text]
+
+    def find_ocr_text(self, text: str, *, contains: bool = True, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> list[OcrItem]:
+        result = self.ocr(region=region, region_relative=region_relative)
+        return [item for item in result.items if text in item.text] if contains else [item for item in result.items if item.text == text]
+
+    def wait_ocr_text(self, text: str, *, contains: bool = True, timeout: float = 10.0, interval: float = 0.5, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> OcrItem:
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        deadline = time.monotonic() + timeout
+        while True:
+            found = self.find_ocr_text(text, contains=contains, region=region, region_relative=region_relative)
+            if found: return found[0]
+            if time.monotonic() >= deadline: raise LookupError(f"OCR text did not appear within {timeout}s: {text}")
+            time.sleep(min(interval, deadline - time.monotonic()))
+
+    def color_matches(self, x: int, y: int, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> bool:
+        return self.capture_frame().color_matches(x, y, expected, tolerance=tolerance, include_alpha=include_alpha)
+
+    def color_matches_relative(self, x_ratio: float, y_ratio: float, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> bool:
+        return self.capture_frame().color_matches_relative(x_ratio, y_ratio, expected, tolerance=tolerance, include_alpha=include_alpha)
+
+    def find_color(self, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> tuple[int, int] | None:
+        return self.capture_frame().find_color(expected, tolerance=tolerance, region=region, region_relative=region_relative)
+
+    def count_color(self, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> int:
+        return self.capture_frame().count_color(expected, tolerance=tolerance, region=region, region_relative=region_relative)
+
+    def assert_color(self, x: int, y: int, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> PixelColor:
+        return self.capture_frame().assert_color(x, y, expected, tolerance=tolerance, include_alpha=include_alpha)
+
+    def assert_color_relative(self, x_ratio: float, y_ratio: float, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> PixelColor:
+        frame = self.capture_frame(); x, y = frame.point_relative(x_ratio, y_ratio)
+        return frame.assert_color(x, y, expected, tolerance=tolerance, include_alpha=include_alpha)
 
     def find_colors(self, colors: str, *, diff: float = 0.98) -> Any:
         return self.gp("ascript.ios.screen.FindColors", f"colors={colors!r}, diff={diff}")

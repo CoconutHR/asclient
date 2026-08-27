@@ -64,7 +64,7 @@ device(text="登录").click()             # 确认无误后再点击
 
 ## IDE 提示
 
-包内置类型注解、中文 docstring 和 `py.typed` 标记。安装后在 PyCharm 或 VS Code/Pylance 中输入 `client.`、`device.` 或将鼠标悬停在方法上，可看到参数类型、中文单位说明、默认值与返回类型。参数名保持英文以兼容 Python 生态；坐标单位、`timeout`/`interval` 秒与 `duration_ms` 毫秒会在中文说明中明确标注。
+包内置类型注解、中文 docstring 和 `py.typed` 标记。安装后在 PyCharm 或 VS Code/Pylance 中输入 `client.`、`device.` 或将鼠标悬停在方法上，可看到参数类型、中文单位说明、默认值与返回类型。参数名保持英文以兼容 Python 生态；`timeout`、`interval`、`duration` 单位为秒，只有带 `_ms` 后缀的参数才使用毫秒。
 
 ```python
 from asclient import AScriptClient
@@ -167,7 +167,7 @@ device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20, log=Tr
 match = device.scroll_until_image("assets/target.png", direction="down", confidence=0.95, timeout=30, max_swipes=8, log=True)
 
 # 自定义比例手势与每次滑动时长；提供后 direction 不参与轨迹计算。
-match = device.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration_ms=650)
+match = device.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration=0.65)
 ```
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：

@@ -23,6 +23,25 @@ class PixelColor:
     g: int
     b: int
     a: int = 255
+    @classmethod
+    def parse(cls, value: "PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str") -> "PixelColor":
+        if isinstance(value, cls): return value
+        if isinstance(value, str):
+            text = value.removeprefix("#")
+            if len(text) not in {6, 8} or any(char not in "0123456789abcdefABCDEF" for char in text):
+                raise ValueError("hex color must be #RRGGBB or #RRGGBBAA")
+            values = tuple(int(text[index:index + 2], 16) for index in range(0, len(text), 2))
+            return cls(*values) if len(values) == 4 else cls(*values, 255)
+        if not isinstance(value, tuple) or len(value) not in {3, 4} or any(not isinstance(channel, int) or isinstance(channel, bool) or not 0 <= channel <= 255 for channel in value):
+            raise ValueError("color must be PixelColor, RGB/RGBA tuple, or #RRGGBB/#RRGGBBAA")
+        return cls(*value) if len(value) == 4 else cls(*value, 255)
+
+    def matches(self, value: "PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str", *, tolerance: int = 0, include_alpha: bool = False) -> bool:
+        expected = self.parse(value)
+        if not isinstance(tolerance, int) or isinstance(tolerance, bool) or tolerance < 0: raise ValueError("tolerance must be a non-negative integer")
+        actual, target = self.rgba if include_alpha else self.rgb, expected.rgba if include_alpha else expected.rgb
+        return all(abs(one - two) <= tolerance for one, two in zip(actual, target))
+
     @property
     def rgb(self) -> tuple[int, int, int]: return self.r, self.g, self.b
     @property
@@ -70,6 +89,28 @@ class ScreenFrame:
         x0, y0, x1, y1 = self._region(None, (left, top, right, bottom), None)
         x1, y1 = max(x1, x0 + 1), max(y1, y0 + 1)
         return self.crop_pixels(x0, y0, min(self.width, x1), min(self.height, y1))
+
+    def color_matches(self, x: int, y: int, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> bool:
+        return self.pixel(x, y).matches(expected, tolerance=tolerance, include_alpha=include_alpha)
+
+    def color_matches_relative(self, x_ratio: float, y_ratio: float, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> bool:
+        return self.pixel_relative(x_ratio, y_ratio).matches(expected, tolerance=tolerance, include_alpha=include_alpha)
+
+    def find_color(self, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None, include_alpha: bool = False) -> tuple[int, int] | None:
+        x0, y0, x1, y1 = self._region(region, region_relative, None)
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                if self.color_matches(x, y, expected, tolerance=tolerance, include_alpha=include_alpha): return x, y
+        return None
+
+    def count_color(self, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None, include_alpha: bool = False) -> int:
+        x0, y0, x1, y1 = self._region(region, region_relative, None)
+        return sum(self.color_matches(x, y, expected, tolerance=tolerance, include_alpha=include_alpha) for y in range(y0, y1) for x in range(x0, x1))
+
+    def assert_color(self, x: int, y: int, expected: PixelColor | tuple[int, int, int] | tuple[int, int, int, int] | str, *, tolerance: int = 0, include_alpha: bool = False) -> PixelColor:
+        actual = self.pixel(x, y)
+        if not actual.matches(expected, tolerance=tolerance, include_alpha=include_alpha): raise AssertionError(f"color at ({x}, {y}) is {actual.hex}, expected {PixelColor.parse(expected).hex}")
+        return actual
 
     def _region(self, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None, region_relative: tuple[float, float, float, float] | None, region_pixels: tuple[int, int, int, int] | None) -> tuple[int, int, int, int]:
         supplied = sum(value is not None for value in (region, region_relative, region_pixels))

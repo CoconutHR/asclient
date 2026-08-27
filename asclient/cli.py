@@ -83,10 +83,10 @@ _HELP: dict[str, tuple[str, str]] = {
     "stop": ("stop\n停止当前项目。需要 --yes。", "stop\nStop the current project. Requires --yes."),
     "log": ("log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]\n读取设备日志回显；不传秒数时默认读取 3 秒。USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]\nRead device log output for the given seconds (default 3). USB mode requires tunnel to forward 10102."),
     "deploy": ("deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]\n上传入口文件、运行项目、收集日志（默认 5 秒）并保存截图。需要 --yes。", "deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]\nUpload an entry file, run the project, collect logs (default 5 seconds), and save a screenshot. Requires --yes."),
-    "tap": ("tap X Y [--duration MS]\n在真机坐标点击。需要 --yes。", "tap X Y [--duration MS]\nTap a device coordinate. Requires --yes."),
-    "tap-rel": ("tap-rel X_RATIO Y_RATIO [--duration MS]\n按屏幕宽高比例点击，例如 0.5 0.92。需要 --yes。", "tap-rel X_RATIO Y_RATIO [--duration MS]\nTap using screen ratios, for example 0.5 0.92. Requires --yes."),
-    "swipe": ("swipe X1 Y1 X2 Y2 [--duration MS]\n从起点滑动到终点。需要 --yes。", "swipe X1 Y1 X2 Y2 [--duration MS]\nSwipe from one point to another. Requires --yes."),
-    "swipe-rel": ("swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]\n按屏幕宽高比例滑动，例如 0.5 0.8 0.5 0.2。需要 --yes。", "swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]\nSwipe using screen ratios, for example 0.5 0.8 0.5 0.2. Requires --yes."),
+    "tap": ("tap X Y [--duration MS | --duration-ms MS | --duration-s SECONDS]\n在真机坐标点击。旧 --duration 保持毫秒。需要 --yes。", "tap X Y [--duration MS | --duration-ms MS | --duration-s SECONDS]\nTap a device coordinate. Legacy --duration remains milliseconds. Requires --yes."),
+    "tap-rel": ("tap-rel X_RATIO Y_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]\n按屏幕宽高比例点击，例如 0.5 0.92。需要 --yes。", "tap-rel X_RATIO Y_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]\nTap using screen ratios, for example 0.5 0.92. Requires --yes."),
+    "swipe": ("swipe X1 Y1 X2 Y2 [--duration MS | --duration-ms MS | --duration-s SECONDS]\n从起点滑动到终点。需要 --yes。", "swipe X1 Y1 X2 Y2 [--duration MS | --duration-ms MS | --duration-s SECONDS]\nSwipe from one point to another. Requires --yes."),
+    "swipe-rel": ("swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]\n按屏幕宽高比例滑动，例如 0.5 0.8 0.5 0.2。需要 --yes。", "swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]\nSwipe using screen ratios, for example 0.5 0.8 0.5 0.2. Requires --yes."),
     "input": ("input TEXT [--interval MS]\n向当前焦点输入文本。需要 --yes。", "input TEXT [--interval MS]\nType text into the focused control. Requires --yes."),
     "home": ("home\n执行 Home 操作。需要 --yes。", "home\nPress Home on the device. Requires --yes."),
     "api": ("api METHOD PATH [--params JSON] [--form JSON]\n调用已确认但未封装的原始端点。需要 --yes。", "api METHOD PATH [--params JSON] [--form JSON]\nCall a confirmed but unwrapped API endpoint. Requires --yes."),
@@ -205,9 +205,17 @@ def _parser() -> argparse.ArgumentParser:
     deploy = commands.add_parser("deploy"); deploy.add_argument("project"); deploy.add_argument("entry"); deploy.add_argument("--logs", type=float, default=5.0); deploy.add_argument("--screenshot")
     log = commands.add_parser("log"); log.add_argument("seconds", nargs="?", type=float, default=3.0); log.add_argument("--reconnects", type=int, default=0); log.add_argument("--output"); log.add_argument("--contains")
     for name in ("tap", "swipe"):
-        item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float); item.add_argument("--duration", type=int, default=20 if name == "tap" else 200)
+        item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float)
+        durations = item.add_mutually_exclusive_group()
+        durations.add_argument("--duration", type=int, default=None, help="milliseconds (legacy default unit)")
+        durations.add_argument("--duration-ms", "--duration_ms", dest="duration_ms", type=int, default=None)
+        durations.add_argument("--duration-s", "--duration_s", dest="duration_s", type=float, default=None)
     for name in ("tap-rel", "swipe-rel"):
-        item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float); item.add_argument("--duration", type=int, default=20 if name == "tap-rel" else 200)
+        item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float)
+        durations = item.add_mutually_exclusive_group()
+        durations.add_argument("--duration", type=int, default=None, help="milliseconds (legacy default unit)")
+        durations.add_argument("--duration-ms", "--duration_ms", dest="duration_ms", type=int, default=None)
+        durations.add_argument("--duration-s", "--duration_s", dest="duration_s", type=float, default=None)
     inp = commands.add_parser("input"); inp.add_argument("text"); inp.add_argument("--interval", type=int, default=120)
     raw = commands.add_parser("api", help="call a confirmed but unwrapped API endpoint")
     raw.add_argument("method"); raw.add_argument("path"); raw.add_argument("--params", default="{}"); raw.add_argument("--form", default="{}")
@@ -275,7 +283,9 @@ def main(argv: list[str] | None = None) -> int:
             data = client.read_file(args.path)
             if args.output: Path(args.output).write_bytes(data); print(Path(args.output).resolve())
             else: sys.stdout.buffer.write(data)
-        elif cmd == "ocr": _out(client.ocr(args.rect))
+        elif cmd == "ocr":
+            result = client.ocr(region=tuple(int(value) for value in args.rect.split("|")) if args.rect else None)
+            _out({"items": [{"text": item.text, "rect": item.rect, "confidence": item.confidence} for item in result.items], "raw": result.raw})
         elif cmd == "findcolor": _out(client.find_colors(args.colors, diff=args.diff or 0.98))
         elif cmd == "compare": _out(client.compare_colors(args.colors, diff=args.diff or 0.9))
         elif cmd == "ls": _out(client.projects())
@@ -307,19 +317,19 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "tap":
             if len(args.coordinates) != 2: raise ValueError(t("tap_requires"))
             _confirm(args, client, t("action_tap", coordinates=args.coordinates))
-            _out(client.tap(*args.coordinates, duration_ms=args.duration))
+            _out(client.tap(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
         elif cmd == "tap-rel":
             if len(args.coordinates) != 2: raise ValueError(t("tap_relative_requires"))
             _confirm(args, client, t("action_tap_relative", coordinates=args.coordinates))
-            _out(client.tap_relative(*args.coordinates, duration_ms=args.duration))
+            _out(client.tap_relative(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
         elif cmd == "swipe":
             if len(args.coordinates) != 4: raise ValueError(t("swipe_requires"))
             _confirm(args, client, t("action_swipe", coordinates=args.coordinates))
-            _out(client.swipe(*args.coordinates, duration_ms=args.duration))
+            _out(client.swipe(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
         elif cmd == "swipe-rel":
             if len(args.coordinates) != 4: raise ValueError(t("swipe_relative_requires"))
             _confirm(args, client, t("action_swipe_relative", coordinates=args.coordinates))
-            _out(client.swipe_relative(*args.coordinates, duration_ms=args.duration))
+            _out(client.swipe_relative(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
         elif cmd == "input": _confirm(args, client, t("action_input")); _out(client.input_text(args.text, interval_ms=args.interval))
         elif cmd == "home": _confirm(args, client, t("action_home")); _out(client.home())
         elif cmd == "app": _out(client.current_app())
