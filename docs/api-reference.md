@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.6.3`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.6.4`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -397,24 +397,27 @@ with Run(device, artifacts_root="artifacts") as run:
 
 ### `tap(x, y, *, duration_ms=20)`
 
-点击 AScript 坐标。坐标单位必须以当前目标设备真机验证；不要直接将 OCR 的物理像素坐标假定为 tap 坐标。
+点击物理像素动作坐标。它与截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的 `Action coordinate` 取得准确数值。不要把 `screen_size()` 返回的 iOS 逻辑点直接传给 `tap`。
 
 ```python
 client.tap(200, 600)
 ```
 
-### `screen_size()`、`relative_point()` 与 `tap_relative()`
+### `screen_size()`、`action_size()`、`relative_point()` 与 `tap_relative()`
 
-按当前真机的 AScript 屏幕尺寸进行比例定位，适合固定在“屏幕中部”“底部按钮区域”等相对位置的操作。比例必须是 `0.0` 到 `1.0` 的有限数字：`0.0` 表示左/上边缘，`1.0` 会夹紧到最后一个有效坐标，避免越界。换算发生在每次调用时，因此会适应不同设备尺寸和当前横竖屏。
+`screen_size()` 返回 AScript 的 iOS 逻辑点尺寸；`action_size()` 读取当前 PNG 截图头并返回动作接口使用的物理像素尺寸。以 iPhone 393 x 852 点、3 倍截图为例，动作尺寸为 1179 x 2556 像素。`tap`、`swipe`、截图、OCR 与 Inspector 的 `Action coordinate` 都使用物理像素。
+
+比例 API 始终依据 `action_size()` 换算，适合固定在“屏幕中部”“底部按钮区域”等相对位置的操作。比例必须是 `0.0` 到 `1.0` 的有限数字：`0.0` 表示左/上边缘，`1.0` 会夹紧到最后一个有效像素，避免越界。换算发生在每次调用时，因此会适应不同设备尺寸和当前横竖屏。`UiObject.click()` 同样会将控件树的逻辑点自动换算为动作像素。
 
 ```python
-size = client.screen_size()                 # {"width": 393.0, "height": 852.0}
-x, y = client.relative_point(0.5, 0.92)    # (196.5, 783.84)
+logical = client.screen_size()              # {"width": 393.0, "height": 852.0}
+action = client.action_size()               # {"width": 1179.0, "height": 2556.0}
+x, y = client.relative_point(0.5, 0.92)    # (589.5, 2351.52)
 client.tap_relative(0.5, 0.92)             # 点击宽度 50%、高度 92% 的位置
 client.swipe_relative(0.5, 0.8, 0.5, 0.2)
 ```
 
-高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。比例坐标基于设备的屏幕坐标系，不能把 OCR 返回的物理像素直接当成比例或绝对点击坐标。
+高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。控件树的 `x/y/width/height` 仍按树自身坐标返回，应该通过 `UiObject.click()` 触发自动换算，而不是手工将树节点中心直接传入 `tap`。
 
 ### `swipe(x1, y1, x2, y2, *, duration_ms=200)`
 

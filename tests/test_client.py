@@ -85,17 +85,18 @@ class ClientTests(unittest.TestCase):
         self.assertIn(b"ascript.ios.action", call[3])
 
     def test_relative_coordinates_scale_and_remain_in_screen_bounds(self):
-        original_json, original_tap = self.client.json, self.client.tap
+        original_json, original_tap, original_screenshot = self.client.json, self.client.tap, self.client.screenshot
         self.client.json = lambda method, path, **kwargs: {"code": 1, "data": {"width": 393, "height": 852}} if path == "/api/screen/size" else original_json(method, path, **kwargs)
-        self.assertEqual(self.client.relative_point(0.5, 0.92), (196.5, 783.84))
-        self.assertEqual(self.client.relative_point(1, 1), (392.0, 851.0))
-        tapped = []
-        self.client.tap = lambda x, y, **kwargs: tapped.append((x, y, kwargs))
         try:
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1179).to_bytes(4, "big") + (2556).to_bytes(4, "big")
+            self.assertEqual(self.client.relative_point(0.5, 0.92), (589.5, 2351.52))
+            self.assertEqual(self.client.relative_point(1, 1), (1178.0, 2555.0))
+            tapped = []
+            self.client.tap = lambda x, y, **kwargs: tapped.append((x, y, kwargs))
             Device(self.client).click_rel(0.5, 0.92, duration_ms=30)
         finally:
-            self.client.json, self.client.tap = original_json, original_tap
-        self.assertEqual(tapped, [(196.5, 783.84, {"duration_ms": 30})])
+            self.client.json, self.client.tap, self.client.screenshot = original_json, original_tap, original_screenshot
+        self.assertEqual(tapped, [(589.5, 2351.52, {"duration_ms": 30})])
         with self.assertRaises(ValueError): self.client.relative_point(-0.1, 0.5)
         with self.assertRaises(ValueError): self.client.relative_point(float("nan"), 0.5)
 
@@ -139,11 +140,16 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(button.exists)
         self.assertEqual(button.count, 1)
         self.assertEqual(button.info["name"], "confirm")
-        button.click()
+        original_screenshot = self.client.screenshot
+        self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (300).to_bytes(4, "big") + (600).to_bytes(4, "big")
+        try: button.click()
+        finally: self.client.screenshot = original_screenshot
         lookup = next(call for call in Handler.calls if call[1] == "/api/tool/view/dump")
         selector = json.loads(lookup[2]["selector"][0])
         self.assertEqual(selector["sel"][0], {"key": "label", "params": "Confirm"})
-        self.assertIn(b"ascript.ios.action", next(call for call in Handler.calls if call[1] == "/api/gp/eval")[3])
+        action = next(call for call in Handler.calls if call[1] == "/api/gp/eval")[3]
+        self.assertIn(b"ascript.ios.action", action)
+        self.assertIn(b"click%2875.0%2C+120.0", action)
 
     def test_connect_returns_a_device_facade(self):
         self.assertIsInstance(connect(f"127.0.0.1:{self.server.server_port}", retries=0), Device)

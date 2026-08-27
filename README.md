@@ -9,7 +9,8 @@ from asclient import AScriptClient
 
 device = AScriptClient("192.168.3.17:9096")
 device.save_screenshot("screen.png")
-device.tap(200, 600)
+# tap/swipe 使用截图的物理像素坐标；先用 action_size() 确认尺寸。
+device.tap(600, 1800)
 device.upload_file("demo", "__init__.py")
 device.run_project("demo")
 ```
@@ -75,6 +76,8 @@ device.selector().at(200, 600)
 # 也可按当前屏幕的宽高比例定位：屏幕中部偏下。
 device.click_rel(0.5, 0.92)
 ```
+
+坐标规则：`screen_size()` 返回 iOS 逻辑点（例如 `393 x 852`）；`action_size()`、截图、OCR 与 `tap`/`swipe` 使用物理像素（该设备为 `1179 x 2556`）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的 `Action coordinate`。
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：
 

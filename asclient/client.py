@@ -202,6 +202,29 @@ class AScriptClient:
     def screenshot(self) -> bytes:
         return self.request("GET", "/api/screen/capture", timeout=30)
 
+    @staticmethod
+    def _png_size(image: bytes) -> tuple[float, float] | None:
+        """Return PNG dimensions without adding an image-library dependency."""
+        if len(image) < 24 or not image.startswith(b"\x89PNG\r\n\x1a\n"):
+            return None
+        width = int.from_bytes(image[16:20], "big")
+        height = int.from_bytes(image[20:24], "big")
+        if width <= 0 or height <= 0:
+            return None
+        return float(width), float(height)
+
+    def action_size(self) -> dict[str, float]:
+        """Return the physical-pixel coordinate space used by ``tap`` and ``swipe``.
+
+        AScript's iOS action module uses screenshot pixels, while
+        :meth:`screen_size` reports iOS logical points.  The two must not be
+        mixed on Retina devices.
+        """
+        size = self._png_size(self.screenshot())
+        if size is None:
+            raise DeviceResponseError("invalid PNG returned by screenshot endpoint")
+        return {"width": size[0], "height": size[1]}
+
     def save_screenshot(self, destination: str | Path) -> Path:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +291,7 @@ class AScriptClient:
         with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
     def screen_size(self) -> dict[str, float]:
-        """Return the current AScript coordinate-space width and height."""
+        """Return the iOS logical-point width and height reported by AScript."""
         value = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
         try:
             width, height = float(value["width"]), float(value["height"])
@@ -279,14 +302,17 @@ class AScriptClient:
         return {"width": width, "height": height}
 
     def relative_point(self, x_ratio: float, y_ratio: float) -> tuple[float, float]:
-        """Convert two 0..1 ratios into current AScript screen coordinates."""
+        """Convert two 0..1 ratios into physical action coordinates.
+
+        The result is directly suitable for :meth:`tap` and :meth:`swipe`.
+        """
         try:
             x_ratio, y_ratio = float(x_ratio), float(y_ratio)
         except (TypeError, ValueError) as exc:
             raise ValueError(t("relative_ratio_invalid")) from exc
         if not all(math.isfinite(value) and 0 <= value <= 1 for value in (x_ratio, y_ratio)):
             raise ValueError(t("relative_ratio_invalid"))
-        size = self.screen_size()
+        size = self.action_size()
         # Keep 1.0 within the valid final coordinate while retaining fractional points elsewhere.
         return min(size["width"] - 1, size["width"] * x_ratio), min(size["height"] - 1, size["height"] * y_ratio)
 

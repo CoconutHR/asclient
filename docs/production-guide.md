@@ -197,7 +197,7 @@ client.input_text("hello", interval_ms=120)
 ocr_result = client.ocr()
 ```
 
-OCR 返回的坐标可能是物理像素，而节点树和 `tap` 通常使用 AScript 屏幕坐标。不要直接混用。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前 `screen_size()` 换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
+AScript 在 iOS 上存在两套坐标：`screen_size()` 与控件树通常是逻辑点；截图、OCR、`tap` 和 `swipe` 是物理像素。示例设备的逻辑尺寸为 `393 x 852`，截图/动作尺寸为 `1179 x 2556`。不要混用两者：绝对点击使用 Inspector 的 `Action coordinate` 或 `action_size()`，语义控件使用 `UiObject.click()`（会自动换算）。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
 
 ## 6. Inspector 工作流
 
@@ -213,7 +213,7 @@ py -m asclient inspect
 2. 点击截图或左侧树中的节点，核对矩形、`name`、`label`、`type` 和可见状态。
 3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
-5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示映射到 AScript 真机坐标系的 `x/y`，可直接用于坐标动作验证；面板缩放不会改变该数值。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
+5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示物理像素 `Action coordinate`，可直接用于 `tap`/`swipe`；面板缩放不会改变该数值。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 

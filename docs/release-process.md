@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows-smoke.ps1 -Install
 3. 在至少一台目标 iPhone 上完成 smoke，并保留工件。
 4. 更新版本、变更说明与兼容性矩阵。
 5. 合并到 `main`，确认 GitHub Actions 通过。
-6. 使用已验证提交创建 Git tag，例如 `v0.6.3`。
+6. 使用已验证提交创建 Git tag，例如 `v0.6.4`。
 7. 在 Windows 从新克隆或干净虚拟环境执行安装验证。
 8. 在目标真机运行 `py -m asclient doctor --report artifacts\doctor.json`；USB 场景还须完成 `tunnel`、`status` 和 `log` 验收。
 
