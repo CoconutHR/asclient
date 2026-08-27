@@ -1,6 +1,7 @@
 """uiautomator2-inspired automation primitives for AScript iOS devices."""
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,6 +156,11 @@ class SnapshotCollection:
         return self.snapshot._nodes[self.indices[0]]
     def all(self) -> list[SnapshotNode]: return [SnapshotNode(self.snapshot, index) for index in self.indices]
     def get(self) -> SnapshotNode | None: return self.all()[0] if self.indices else None
+    def where_regex(self, field: str, pattern: str) -> "SnapshotCollection":
+        if field not in {"name", "label", "value", "title", "type", "enabled", "selected", "focused", "visible", "index", "traits", "childCount"}:
+            raise ValueError(f"unsupported selector attribute: {field}")
+        matcher = re.compile(pattern).search
+        return SnapshotCollection(self.snapshot, tuple(index for index in self.indices if matcher(str(self.snapshot._nodes[index].get(field) or ""))))
     def child(self, selector: Selector | None = None) -> "SnapshotCollection":
         indices = tuple(child for index in self.indices for child in self.snapshot._children[index])
         return self.snapshot._filter(indices, selector)
@@ -217,12 +223,23 @@ class Device:
         views = data.get("views") or []
         if not isinstance(views, list): raise ValueError("invalid element list returned by device")
         return [UiObject(self, dict(item), selector) for item in views if isinstance(item, Mapping)]
-    def find(self, selector: Selector, *, timeout: float = 0, log: bool = False) -> UiObject | None: return UiCollection(self, selector).get(timeout=timeout, log=log)
-    def wait(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> UiObject:
-        result = self.find(selector, timeout=timeout, log=log)
+    def find(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, log: bool = False) -> UiObject | None: return UiCollection(self, selector).get(timeout=timeout, interval=interval, log=log)
+    def wait(self, selector: Selector, *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> UiObject:
+        result = self.find(selector, timeout=timeout, interval=interval, log=log)
         if result is None: raise LookupError(f"element did not appear within {timeout}s: {selector.code()}")
         return result
-    def wait_gone(self, selector: Selector, *, timeout: float = 10.0, log: bool = False) -> bool: return UiCollection(self, selector).wait_gone(timeout=timeout, log=log)
+    def wait_any(self, selectors: Mapping[str, Selector], *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> tuple[str, UiObject]:
+        if not selectors: raise ValueError("selectors must not be empty")
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        deadline = time.monotonic() + timeout
+        while True:
+            snapshot = self.snapshot(mode="full")
+            for name, selector in selectors.items():
+                found = snapshot.select(selector).get()
+                if found: return name, found.object
+            if time.monotonic() >= deadline: raise LookupError(f"none of the elements appeared within {timeout}s: {', '.join(selectors)}")
+            time.sleep(min(interval, deadline - time.monotonic()))
+    def wait_gone(self, selector: Selector, *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> bool: return UiCollection(self, selector).wait_gone(timeout=timeout, interval=interval, log=log)
     def dump_hierarchy(self, *, mode: str = "smart") -> str: return self.client.ui_xml(mode=mode)
     def screenshot(self, destination: str | None = None) -> bytes | Any: return self.client.save_screenshot(destination) if destination else self.client.screenshot()
     def click_relative(self, x_ratio: float, y_ratio: float, *, duration_ms: int = 20) -> Any: return self.client.tap_relative(x_ratio, y_ratio, duration_ms=duration_ms)
@@ -259,7 +276,8 @@ class UiCollection:
         return item.info
     def all(self) -> list[UiObject]: return self.device.find_all(self.selector)
     def snapshot(self, *, mode: str = "full") -> SnapshotCollection: return self.device.snapshot(mode=mode).select(self.selector)
-    def get(self, *, timeout: float = 0, log: bool = False) -> UiObject | None:
+    def get(self, *, timeout: float = 0, interval: float = 0.3, log: bool = False) -> UiObject | None:
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout; attempt = 0
         while True:
             attempt += 1; found = self.all()
@@ -268,8 +286,9 @@ class UiCollection:
                 return found[0]
             if log: print(t("selector_wait_missing", attempt=attempt, selector=self.selector.code()))
             if time.monotonic() >= deadline: return None
-            time.sleep(min(0.3, deadline - time.monotonic()))
-    def wait_gone(self, *, timeout: float = 10.0, log: bool = False) -> bool:
+            time.sleep(min(interval, deadline - time.monotonic()))
+    def wait_gone(self, *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> bool:
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
         deadline = time.monotonic() + timeout; attempt = 0
         while True:
             attempt += 1
@@ -278,7 +297,7 @@ class UiCollection:
                 return True
             if log: print(t("selector_wait_present", attempt=attempt, selector=self.selector.code()))
             if time.monotonic() >= deadline: return False
-            time.sleep(min(0.3, deadline - time.monotonic()))
+            time.sleep(min(interval, deadline - time.monotonic()))
     def click(self) -> Any:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")

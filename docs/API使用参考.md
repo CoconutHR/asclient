@@ -369,11 +369,28 @@ if element is None:
     raise RuntimeError("login button not found")
 ```
 
-#### `wait(selector, *, timeout=10, log=False) -> UiObject`
+#### `wait(selector, *, timeout=10, interval=0.3, log=False) -> UiObject`
 
-等待元素出现并返回；超时抛出 `LookupError`。适合“缺失即为失败”的关键控件，与 `find()` 的返回 `None` 语义互补。
+等待元素出现并返回；超时抛出 `LookupError`。`interval` 是每轮设备查询间隔（秒），必须大于零；适合“缺失即为失败”的关键控件，与 `find()` 的返回 `None` 语义互补。
 
-#### `wait_gone(selector, *, timeout=10, log=False) -> bool`
+#### `wait_any(selectors, *, timeout=10, interval=0.3, log=False) -> tuple[str, UiObject]`
+
+等待任一命名 selector 出现。`selectors` 是 `{名称: Selector}` 映射，返回命中的名称和元素。每一轮只读取一次 `full` 树并在本地筛选所有 selector，避免候选数量增加时重复请求设备。
+
+```python
+name, element = device.wait_any(
+    {
+        "success": device.selector().name("home_screen"),
+        "failure": device.selector().text("登录失败"),
+    },
+    timeout=15,
+    interval=0.5,
+)
+```
+
+它只保证同一轮内各候选来自同一棵树；在 `element.click()` 前页面仍可能变化，关键动作前需要最新状态时请重新查询。
+
+#### `wait_gone(selector, *, timeout=10, interval=0.3, log=False) -> bool`
 
 等待元素消失；消失返回 `True`，超时返回 `False`。
 
@@ -401,7 +418,7 @@ assert submit.count == 1
 submit.get().click()
 ```
 
-`SnapshotCollection` 支持 `.exists`、`.count`、`.info`、`.all()`、`.get()`，以及 `.child()`（直接子节点）、`.descendant()`（所有后代）、`.parent()`、`.sibling()`。关系选择器只在本地快照中解释，绝不会发送给设备端 selector 协议。快照节点的 `info`、`rect`、`center` 已归一化为物理像素，但页面跳转后可能过期；在动作前需要最新页面状态时，请重新创建快照或使用普通 `device(...)` 查询。
+`SnapshotCollection` 支持 `.exists`、`.count`、`.info`、`.all()`、`.get()`，以及 `.child()`（直接子节点）、`.descendant()`（所有后代）、`.parent()`、`.sibling()`。`.where_regex(field, pattern)` 可用 Python 正则表达式在当前快照集合内筛选字段，例如 `snapshot().descendant().where_regex("name", r"item_\d+")`。正则和关系选择器只在本地快照中解释，绝不会发送给设备端 selector 协议。快照节点的 `info`、`rect`、`center` 已归一化为物理像素，但页面跳转后可能过期；在动作前需要最新页面状态时，请重新创建快照或使用普通 `device(...)` 查询。
 
 #### 坐标与图片委托
 

@@ -599,6 +599,25 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(name, "found")
         self.assertEqual((match.x, match.y), (4, 4))
 
+    def test_wait_any_uses_one_full_snapshot_per_attempt_and_regex_stays_local(self):
+        original = self.client.ui_tree; calls = []
+        self.client.ui_tree = lambda **kwargs: calls.append(kwargs) or {"views": [{"name": "root", "childs": [{"name": "success_42", "label": "完成", "childs": []}]}]}
+        try:
+            device = Device(self.client)
+            name, element = device.wait_any({"failure": device.selector().name("failure"), "success": device.selector().name("success_42")}, timeout=0)
+            self.assertEqual(name, "success")
+            self.assertEqual(element.info["name"], "success_42")
+            self.assertEqual(device.snapshot()(name="root").descendant().where_regex("name", r"success_\d+").count, 1)
+        finally:
+            self.client.ui_tree = original
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["mode"], "full")
+
+    def test_wait_interval_is_configurable_and_validated(self):
+        device = Device(self.client)
+        with self.assertRaises(ValueError): device.find(device.selector().name("missing"), interval=0)
+        with self.assertRaises(ValueError): device.wait_gone(device.selector().name("missing"), interval=0)
+
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve
         server = serve(self.client, open_browser=False)
