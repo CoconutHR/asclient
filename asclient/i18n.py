@@ -61,7 +61,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "swipe_requires": ("swipe 需要四个参数：X1 Y1 X2 Y2", "swipe requires X1 Y1 X2 Y2"),
     "relative_ratio_invalid": ("相对坐标比例必须是 0.0 到 1.0 之间的有限数字", "relative coordinate ratios must be finite numbers between 0.0 and 1.0"),
     "image_scroll_match": ("[图像滚动] 第 {attempt} 次匹配：已找到，坐标=({x}, {y})，置信度={confidence:.4f}", "[image scroll] attempt {attempt}: found at ({x}, {y}), confidence={confidence:.4f}"),
-    "image_scroll_next": ("[图像滚动] 第 {attempt} 次匹配：未找到；向上滑动", "[image scroll] attempt {attempt}: not found; scrolling upward"),
+    "image_scroll_next": ("[图像滚动] 第 {attempt} 次匹配：未找到；继续滑动", "[image scroll] attempt {attempt}: not found; continuing to swipe"),
     "image_scroll_stop": ("[图像滚动] 第 {attempt} 次匹配：未找到；已达到停止条件", "[image scroll] attempt {attempt}: not found; stop condition reached"),
     "image_wait_found": ("[图像等待] 第 {attempt} 次检查：已找到，坐标=({x}, {y})，置信度={confidence:.4f}", "[image wait] attempt {attempt}: found at ({x}, {y}), confidence={confidence:.4f}"),
     "image_wait_missing": ("[图像等待] 第 {attempt} 次检查：未找到", "[image wait] attempt {attempt}: not found"),

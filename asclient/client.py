@@ -551,11 +551,18 @@ class AScriptClient:
         """Swipe between two points expressed as fractions of current screen dimensions."""
         return self.swipe(*self.relative_point(x1_ratio, y1_ratio), *self.relative_point(x2_ratio, y2_ratio), duration_ms=duration_ms)
 
-    def scroll_until_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, x_ratio: float = 0.5, start_y_ratio: float = 0.8, end_y_ratio: float = 0.2, duration_ms: int = 300, log: bool = False) -> ImageMatch:
-        """Scroll upward until a template appears, then return its match."""
+    def scroll_until_image(self, template: str | Path | bytes, *, direction: str = "down", confidence: float = 0.9, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, region: tuple[float, float, float, float] | None = None, duration_ms: int = 300, log: bool = False) -> ImageMatch:
+        """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
-        self.relative_point(x_ratio, start_y_ratio); self.relative_point(x_ratio, end_y_ratio)
+        directions = {
+            "down": (0.5, 0.2, 0.5, 0.8), "up": (0.5, 0.8, 0.5, 0.2),
+            "left": (0.8, 0.5, 0.2, 0.5), "right": (0.2, 0.5, 0.8, 0.5),
+            "下": (0.5, 0.2, 0.5, 0.8), "上": (0.5, 0.8, 0.5, 0.2),
+            "左": (0.8, 0.5, 0.2, 0.5), "右": (0.2, 0.5, 0.8, 0.5),
+        }
+        try: x1, y1, x2, y2 = directions[direction.lower()]
+        except (AttributeError, KeyError) as exc: raise ValueError("direction must be one of: down, up, left, right, 下, 上, 左, 右") from exc
         deadline = time.monotonic() + timeout
         for swipe_number in range(max_swipes + 1):
             match = self.find_image(template, confidence=confidence, region=region)
@@ -567,9 +574,9 @@ class AScriptClient:
                 if log: print(t("image_scroll_stop", attempt=attempt))
                 break
             if log: print(t("image_scroll_next", attempt=attempt))
-            self.swipe_relative(x_ratio, start_y_ratio, x_ratio, end_y_ratio, duration_ms=duration_ms)
+            self.swipe_relative(x1, y1, x2, y2, duration_ms=duration_ms)
             time.sleep(min(interval, max(0, deadline - time.monotonic())))
-        raise TimeoutError(f"image did not appear after {max_swipes} upward swipes or before timeout")
+        raise TimeoutError(f"image did not appear after {max_swipes} {direction} swipes or before timeout")
 
     def input_text(self, text: str, *, interval_ms: int = 120) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import input\ninput(%s, %r)\n_result=True" % (json.dumps(text, ensure_ascii=False), interval_ms))

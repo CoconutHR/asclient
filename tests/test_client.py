@@ -100,20 +100,32 @@ class ClientTests(unittest.TestCase):
         self.assertEqual((match.x, match.y, match.width, match.height), (12, 8, 4, 3))
         self.assertIsNone(self.client._image_match(source_data.getvalue(), template_data.getvalue(), confidence=0.99, region=(0, 0, 0.4, 0.3)))
 
-    def test_scroll_until_image_checks_before_each_upward_swipe(self):
+    def test_scroll_until_image_checks_before_each_directional_swipe(self):
         original_find, original_swipe, original_relative = self.client.find_image, self.client.swipe_relative, self.client.relative_point
         attempts, swipes = [], []
         try:
             self.client.find_image = lambda *args, **kwargs: attempts.append(1) or ({} if len(attempts) == 3 else None)
             self.client.swipe_relative = lambda *args, **kwargs: swipes.append((args, kwargs))
             self.client.relative_point = lambda *args: (1, 1)
-            result = self.client.scroll_until_image(b"template", max_swipes=4, interval=0.001)
+            result = self.client.scroll_until_image(b"template", direction="up", max_swipes=4, interval=0.001)
         finally:
             self.client.find_image, self.client.swipe_relative, self.client.relative_point = original_find, original_swipe, original_relative
         self.assertEqual(result, {})
         self.assertEqual(len(attempts), 3)
         self.assertEqual(len(swipes), 2)
         self.assertEqual(swipes[0][0], (0.5, 0.8, 0.5, 0.2))
+
+    def test_scroll_until_image_defaults_down_and_supports_horizontal_directions(self):
+        original_find, original_swipe = self.client.find_image, self.client.swipe_relative
+        swipes = []
+        try:
+            self.client.find_image = lambda *args, **kwargs: None
+            self.client.swipe_relative = lambda *args, **kwargs: swipes.append(args)
+            for direction in ("down", "left", "right", "上"):
+                with self.assertRaises(TimeoutError): self.client.scroll_until_image(b"template", direction=direction, max_swipes=1, timeout=1)
+        finally:
+            self.client.find_image, self.client.swipe_relative = original_find, original_swipe
+        self.assertEqual(swipes, [(0.5, 0.2, 0.5, 0.8), (0.8, 0.5, 0.2, 0.5), (0.2, 0.5, 0.8, 0.5), (0.5, 0.8, 0.5, 0.2)])
 
     def test_scroll_until_image_can_print_each_match_attempt(self):
         original_find, original_relative = self.client.find_image, self.client.relative_point
