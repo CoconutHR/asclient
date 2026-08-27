@@ -81,7 +81,7 @@ device.selector().at(200, 600)
 device.click_rel(0.5, 0.92)
 ```
 
-坐标规则：`screen_size()`、`action_size()`、控件树、截图、OCR 与 `tap`/`swipe` 都使用物理像素（该设备为 `1179 x 2556`）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的 `Action coordinate`。只有 `status()["logical_screen"]` 会显式提供移动端原始逻辑点，供协议诊断使用。
+坐标规则：`screen_size()`、`action_size()`、控件树、截图、OCR 与 `tap`/`swipe` 都使用物理像素（该设备为 `1179 x 2556`）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的“动作坐标”。只有 `status()["logical_screen"]` 会显式提供移动端原始逻辑点，供协议诊断使用。
 
 截图支持比例裁剪，矩形采用 `left top right bottom`，范围为 `0..1`：
 
@@ -123,9 +123,9 @@ with Run(device) as run:
 
 ## Inspector 与真机验收
 
-`py -m asclient inspect` 会启动仅监听本机回环地址的浏览器 Inspector，展示当前截图、控件树、前台 App、控件属性、可复制选择器和真机坐标。拖动三栏分隔线不会影响截图比例或点击坐标映射。
+`py -m asclient inspect` 会启动仅监听本机回环地址的浏览器 Inspector。界面全部使用中文，展示当前截图、控件树、前台 App、控件属性、可复制选择器和真机坐标。拖动三栏分隔线不会影响截图比例或点击坐标映射。
 
-顶部的 `Crop save` 可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。
+顶部的“裁剪保存”可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。
 
 部分 App 或页面不暴露无障碍控件树，此时 Inspector 会正确显示没有语义节点。仍可单独使用截图、OCR、图色与坐标操作；不要假设所有页面都能使用语义选择器。
 

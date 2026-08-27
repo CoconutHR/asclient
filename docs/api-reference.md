@@ -447,7 +447,7 @@ with Run(device, artifacts_root="artifacts") as run:
 
 ### `tap(x, y, *, duration_ms=20)`
 
-点击物理像素动作坐标。它与 `screen_size()`、截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的 `Action coordinate` 取得准确数值。
+点击物理像素动作坐标。它与 `screen_size()`、截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的“动作坐标”取得准确数值。
 
 ```python
 client.tap(200, 600)
@@ -455,7 +455,7 @@ client.tap(200, 600)
 
 ### `screen_size()`、`action_size()`、`relative_point()` 与 `tap_relative()`
 
-`screen_size()` 返回当前真实物理分辨率，且与 `action_size()` 同义；两者都读取当前 PNG 截图头。以 iPhone 393 x 852 点、3 倍截图为例，返回 `1179 x 2556`。`tap`、`swipe`、截图、OCR 与 Inspector 的 `Action coordinate` 都使用物理像素。
+`screen_size()` 返回当前真实物理分辨率，且与 `action_size()` 同义；两者都读取当前 PNG 截图头。以 iPhone 393 x 852 点、3 倍截图为例，返回 `1179 x 2556`。`tap`、`swipe`、截图、OCR 与 Inspector 的“动作坐标”都使用物理像素。
 
 客户端对控件树的 `x/y/width/height`、`ui_tree(..., x, y)` 点探测参数和 XML 坐标也统一使用物理像素，`UiObject.click()` 因而可直接使用控件中心点。只有 `status()["logical_screen"]` 显式保留服务端返回的逻辑点尺寸，用于诊断移动端协议。
 
@@ -721,8 +721,8 @@ run_forever(client, host="127.0.0.1", port=0)
 | `serve(client, host="127.0.0.1", port=0, open_browser=True)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口 |
 | `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
 
-Inspector 只应绑定 `127.0.0.1`。它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部 `Crop save` 按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
+Inspector 只应绑定 `127.0.0.1`。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部“裁剪保存”按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
 
 CLI 启动时会打印实际 Inspector URL。浏览器在刷新或关闭页面时取消正在传输的快照属于正常情况，客户端会静默结束该响应，不会影响设备端状态或打印终端堆栈。
 
-页面中的 **Verify selector** 按钮会以只读方式查询当前候选选择器的实际匹配数。只有结果为 `1` 时，才应将其作为代码候选；该按钮不会点击或修改设备状态。
+页面中的“验证选择器”按钮会以只读方式查询当前候选选择器的实际匹配数。只有结果为 `1` 时，才应将其作为代码候选；该按钮不会点击或修改设备状态。

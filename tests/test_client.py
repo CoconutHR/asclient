@@ -415,6 +415,9 @@ class ClientTests(unittest.TestCase):
             self.assertIn('id="appmeta"', page)
             self.assertIn('id="coordinate"', page)
             self.assertIn('id="divider-left"', page)
+            self.assertIn("ASClient 控件检查器", page)
+            self.assertIn("裁剪保存", page)
+            self.assertIn("验证选择器", page)
             with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
                 snapshot = json.loads(response.read())
             self.assertEqual(snapshot["tree"]["views"][0]["name"], "confirm")

@@ -202,7 +202,7 @@ client.input_text("hello", interval_ms=120)
 ocr_result = client.ocr()
 ```
 
-客户端所有普通坐标 API 均统一为物理像素：`screen_size()`、控件树、XML、截图、OCR、`tap` 和 `swipe`。示例设备的截图/动作尺寸为 `1179 x 2556`。只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断而非定位使用。绝对点击使用 Inspector 的 `Action coordinate` 或 `screen_size()`；语义控件使用 `UiObject.click()`。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
+客户端所有普通坐标 API 均统一为物理像素：`screen_size()`、控件树、XML、截图、OCR、`tap` 和 `swipe`。示例设备的截图/动作尺寸为 `1179 x 2556`。只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断而非定位使用。绝对点击使用 Inspector 的“动作坐标”或 `screen_size()`；语义控件使用 `UiObject.click()`。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
 
 截图局部验收可使用 `save_screenshot_crop_relative(path, left, top, right, bottom)`；比例矩形必须满足 `0 <= left < right <= 1` 和 `0 <= top < bottom <= 1`。CLI 等价形式为 `shot FILE --crop-rel LEFT TOP RIGHT BOTTOM`。
 
@@ -222,12 +222,12 @@ py -m asclient inspect
 
 浏览器打开后：
 
-1. 选择 `Smart`，点击 Refresh，确认顶部显示的 App 名称、Bundle ID、PID 与待测 App 一致，且树中有实际节点。
+1. 选择“智能”，点击“刷新”，确认顶部显示的 App 名称、Bundle ID、PID 与待测 App 一致，且树中有实际节点。
 2. 点击截图或左侧树中的节点，核对矩形、`name`、`label`、`type` 和可见状态。
-3. 使用页面生成的选择器作为起点，点击 Verify selector，并将结果为唯一匹配的组合写入代码。
+3. 使用页面生成的选择器作为起点，点击“验证选择器”，并将结果为唯一匹配的组合写入代码。
 4. 在 Python 中调用 `.count`、`.info` 和 `.click()` 进行真机验证。
-5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示物理像素 `Action coordinate`，可直接用于 `tap`/`swipe`；面板缩放不会改变该数值。`Smart` 树缺节点时尝试 `Full`；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
-6. 需要取得局部模板时，点击顶部 `Crop save`，在截图上拖拽矩形后松开。生成的 PNG 保持原始截图物理像素，会保存到启动 `py -m asclient inspect` 时的当前目录；终端目录路径即为保存位置。
+5. 根据需要拖动两条面板分隔线；中间截图会始终等比缩放。点击截图后，顶部会显示物理像素“动作坐标”，可直接用于 `tap`/`swipe`；面板缩放不会改变该数值。“智能”树缺节点时尝试“完整”；仍为空时记录截图和 XML，并使用 OCR/图色作为降级方案。Inspector 的验证动作只读，不会点击设备。
+6. 需要取得局部模板时，点击顶部“裁剪保存”，在截图上拖拽矩形后松开。生成的 PNG 保持原始截图物理像素，会保存到启动 `py -m asclient inspect` 时的当前目录；终端目录路径即为保存位置。
 
 Inspector 默认使用随机端口并只绑定 `127.0.0.1`。不要通过 `--host 0.0.0.0` 暴露它：Inspector 可代表浏览器向手机发起截图和控件树读取，扩大监听范围没有生产必要。
 
@@ -259,7 +259,7 @@ py -m asclient --yes remove smoke
 | `cannot reach AScript device` | 地址、网络、端口或服务未启动 | 检查 iPhone IP、Wi-Fi 隔离、服务状态；先跑 `ping` |
 | `HTTP 500` | 设备端接口不接受路径或当前版本存在缺陷 | 用 `files` 确认远程文件存在；记录端点和响应，不要静默吞掉 |
 | `status_api_error` | iOS 4001 已知 status 实现兼容问题 | 使用降级返回的 `screen/current_app` 验证连通性；不要按 status 全字段做断言 |
-| XML 只有空 Application | 当前页面未暴露无障碍树 | 切换目标 App/页面，尝试 Inspector 的 Full；必要时使用 OCR/图色 |
+| XML 只有空 Application | 当前页面未暴露无障碍树 | 切换目标 App/页面，尝试 Inspector 的“完整”模式；必要时使用 OCR/图色 |
 | `.exists` 为 false | 选择器字段不匹配、页面尚未出现或树模式不对 | 在 Inspector 中核对属性，使用 `.get(timeout=...)`，避免盲目增加 sleep |
 | 点击位置偏移 | 像素与点坐标混用、横竖屏变化或截图缩放 | 对照节点 `rect` 与截图；建立目标设备坐标换算 |
 | 日志无输出 | 项目未运行、日志窗口太短或 WebSocket 端口不可达 | 增加 `--logs` 时长，检查 `run` 结果和 10102 连通性 |
