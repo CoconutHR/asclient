@@ -14,9 +14,9 @@ from urllib.parse import quote
 from urllib.request import urlopen
 
 from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, connect
-from asclient.cli import main
+from asclient.cli import _stop_tunnel_on_sigterm, main
 from asclient.config import device_options, load_config, tunnel_options
-from asclient.doctor import DoctorCheck, _port_available, save_report, set_iproxy_path
+from asclient.doctor import DoctorCheck, _port_available, diagnose, save_report, set_iproxy_path
 from asclient.i18n import set_language
 from asclient.tunnel import _iproxy_not_found_message
 
@@ -194,6 +194,18 @@ class ClientTests(unittest.TestCase):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
             occupied.bind(("127.0.0.1", 0))
             self.assertFalse(_port_available("127.0.0.1", occupied.getsockname()[1]))
+
+    def test_doctor_recognizes_ports_used_by_an_active_local_tunnel(self):
+        with patch("asclient.doctor._port_available", return_value=False):
+            checks = diagnose(self.client, {"tunnel": {"local_port": 19096, "local_log_port": 11002}})
+        ports = {check.name: check for check in checks if check.name in {"service_port", "log_port"}}
+        self.assertEqual(ports["service_port"].status, "ok")
+        self.assertEqual(ports["service_port"].detail, "active_local_tunnel")
+        self.assertEqual(ports["log_port"].status, "ok")
+
+    def test_sigterm_handler_enters_cleanup_path(self):
+        with self.assertRaises(KeyboardInterrupt):
+            _stop_tunnel_on_sigterm(15, None)
 
     def test_cli_requires_yes_for_state_changes(self):
         stderr = StringIO()

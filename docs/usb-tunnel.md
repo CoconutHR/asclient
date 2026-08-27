@@ -135,7 +135,7 @@ py -m asclient --device 127.0.0.1:19096 status
 
 需要排查 HTTP 服务而不使用日志时，可传入 `--no-logs`。否则默认应保持 `forward_logs: true`，这样 `py -m asclient log`、`deploy --logs` 和 Python `client.logs()` 都会通过同一条 USB 连接工作。
 
-`tunnel` 在前台运行，按 `Ctrl+C` 会终止由 ASClient 启动的两个 `iproxy` 进程。不要把这些进程作为后台孤儿任务长期保留。
+`tunnel` 在前台运行，按 `Ctrl+C`、向 ASClient 进程发送 `SIGTERM` 或发生命令异常时，都会进入清理路径并终止由 ASClient 启动的两个 `iproxy` 进程。不要把这些进程作为后台孤儿任务长期保留。
 
 ## Python 使用
 

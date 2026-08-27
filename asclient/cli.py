@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 import time
 from pathlib import Path
@@ -63,6 +64,11 @@ _HELP: dict[str, tuple[str, str]] = {
     "log": ("log [SECONDS]\n读取设备日志回显；USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS]\nRead device log output; USB mode requires tunnel to forward 10102."),
     "tap": ("tap X Y\n在真机坐标点击。需要 --yes。", "tap X Y\nTap a device coordinate. Requires --yes."),
 }
+
+
+def _stop_tunnel_on_sigterm(signum: int, frame: object) -> None:
+    """Route process termination through the tunnel command's cleanup block."""
+    raise KeyboardInterrupt
 
 
 def _print_help(topic: str | None = None) -> None:
@@ -223,11 +229,14 @@ def main(argv: list[str] | None = None) -> int:
             if tunnel.log_address:
                 routes += f"; logs={tunnel.log_address} -> device:{tunnel.remote_log_port}"
             print(t("tunnel_running", routes=routes, address=tunnel.address))
+            previous_sigterm = signal.signal(signal.SIGTERM, _stop_tunnel_on_sigterm)
             try:
                 while tunnel.is_running: time.sleep(0.25)
                 raise TunnelError(t("tunnel_exited", detail=tunnel.exit_summary()))
             except KeyboardInterrupt: pass
-            finally: tunnel.stop()
+            finally:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+                tunnel.stop()
         elif cmd == "eval":
             _confirm(args, client, t("action_eval"))
             _out(client.eval_python(args.code))

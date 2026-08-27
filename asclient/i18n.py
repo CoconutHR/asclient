@@ -87,6 +87,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "doctor_iproxy_missing": ("未找到 iproxy。无法自动安装第三方二进制；请安装受信任的 libimobiledevice，或用 doctor --fix-iproxy <路径> 写入已有 iproxy 的绝对路径。", "iproxy was not found. Third-party binaries are never installed automatically; install a trusted libimobiledevice build or use doctor --fix-iproxy <path> to save an existing iproxy path."),
     "doctor_port_available": ("本机端口 {host}:{port} 可用于建立隧道", "local port {host}:{port} is available for a tunnel"),
     "doctor_port_busy": ("本机端口 {host}:{port} 已被占用。不会自动结束其他程序；请关闭占用程序或在配置中使用其他 local_port。", "local port {host}:{port} is already in use. Other processes are never stopped automatically; close the owner or configure a different local_port."),
+    "doctor_port_tunnel": ("本机端口 {host}:{port} 正由活动 USB 隧道使用。", "local port {host}:{port} is in use by an active USB tunnel."),
     "doctor_device_ok": ("设备服务可访问，平台：{platform}", "device service is reachable, platform: {platform}"),
     "doctor_device_failed": ("无法访问设备服务：{detail}。请检查 device.address、网络/USB 隧道、AScript 服务开关和密码。", "cannot reach the device service: {detail}. Check device.address, network/USB tunnel, AScript service, and password."),
     "doctor_log_ok": ("日志端口可连接：{host}:10102", "log port is reachable: {host}:10102"),

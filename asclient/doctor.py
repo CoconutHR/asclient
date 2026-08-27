@@ -56,14 +56,11 @@ def diagnose(client: AScriptClient, config: Mapping[str, Any]) -> list[DoctorChe
     ports = [("service_port", int(options.get("local_port", 9096)))]
     if bool(options.get("forward_logs", True)):
         ports.append(("log_port", int(options.get("local_log_port", 10102))))
-    for name, port in ports:
-        if _port_available(host, port):
-            checks.append(DoctorCheck(name, "ok", t("doctor_port_available", host=host, port=port)))
-        else:
-            checks.append(DoctorCheck(name, "warning", t("doctor_port_busy", host=host, port=port)))
     probe = AScriptClient(client.address, password=client.password, timeout=min(client.timeout, 3.0), retries=0)
+    device_reachable = False
     try:
         platform = probe.ping()
+        device_reachable = True
         checks.append(DoctorCheck("device", "ok", t("doctor_device_ok", platform=platform)))
         status = probe.status()
         if "status_api_error" in status:
@@ -72,6 +69,14 @@ def diagnose(client: AScriptClient, config: Mapping[str, Any]) -> list[DoctorChe
             checks.append(DoctorCheck("status_api", "ok", t("doctor_status_ok")))
     except AScriptError as exc:
         checks.append(DoctorCheck("device", "error", t("doctor_device_failed", detail=exc), str(exc)))
+    active_local_tunnel = client.address.host in {"127.0.0.1", "localhost"} and device_reachable
+    for name, port in ports:
+        if _port_available(host, port):
+            checks.append(DoctorCheck(name, "ok", t("doctor_port_available", host=host, port=port)))
+        elif active_local_tunnel:
+            checks.append(DoctorCheck(name, "ok", t("doctor_port_tunnel", host=host, port=port), "active_local_tunnel"))
+        else:
+            checks.append(DoctorCheck(name, "warning", t("doctor_port_busy", host=host, port=port)))
     try:
         with socket.create_connection((client.address.host, 10102), timeout=min(client.timeout, 3)):
             pass
