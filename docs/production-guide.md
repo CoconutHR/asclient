@@ -202,6 +202,8 @@ ocr_result = client.ocr()
 
 截图局部验收可使用 `save_screenshot_crop_relative(path, left, top, right, bottom)`；比例矩形必须满足 `0 <= left < right <= 1` 和 `0 <= top < bottom <= 1`。CLI 等价形式为 `shot FILE --crop-rel LEFT TOP RIGHT BOTTOM`。
 
+图标无法暴露控件树时，可使用本机模板等待：`wait_image(template, confidence=0.95, timeout=15)`，返回实际像素坐标的匹配结果；`wait_image_gone()` 用于等待加载图标消失，`tap_image()` 则等待后点击中心点。置信度必须在 `(0, 1]`，越高越严格。模板应从同一分辨率、方向和 UI 缩放状态的真机截图中截取，并优先用 `region=(left, top, right, bottom)` 限制搜索区域以降低误匹配和轮询时间。
+
 ## 6. Inspector 工作流
 
 在目标 App 已打开到待分析页面时执行：

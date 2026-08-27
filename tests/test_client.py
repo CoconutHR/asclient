@@ -85,6 +85,21 @@ class ClientTests(unittest.TestCase):
         self.assertIn(bytes((1, 1, 0, 255)), zlib.decompress(crop[crop.index(b"IDAT") + 4:-12]))
         with self.assertRaises(ValueError): self.client.crop_png_relative(source, 0.8, 0.1, 0.2, 0.9)
 
+    def test_image_matching_honors_confidence_and_region(self):
+        from PIL import Image
+        from io import BytesIO
+        source = Image.new("RGB", (24, 20), "black")
+        template = Image.new("RGB", (4, 3), "black")
+        for y in range(3):
+            for x in range(4): template.putpixel((x, y), (20 + x * 30, 40 + y * 40, 180))
+        source.paste(template, (12, 8))
+        source_data, template_data = BytesIO(), BytesIO()
+        source.save(source_data, "PNG"); template.save(template_data, "PNG")
+        match = self.client._image_match(source_data.getvalue(), template_data.getvalue(), confidence=0.99, region=(0.4, 0.3, 0.9, 0.8))
+        self.assertIsNotNone(match)
+        self.assertEqual((match.x, match.y, match.width, match.height), (12, 8, 4, 3))
+        self.assertIsNone(self.client._image_match(source_data.getvalue(), template_data.getvalue(), confidence=0.99, region=(0, 0, 0.4, 0.3)))
+
     def test_upload_builds_multipart_and_safe_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "main.py"; source.write_text("print(1)", encoding="utf-8")

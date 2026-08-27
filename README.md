@@ -1,6 +1,6 @@
 # AScript 本地客户端
 
-`asclient` 是 AScript iOS 本地设备服务的无第三方依赖 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力。
+`asclient` 是 AScript iOS 本地设备服务的 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力；仅本机模板匹配功能依赖 Pillow。
 
 完整中文文档： [生产使用指南](docs/production-guide.md)、[API 使用参考](docs/api-reference.md)、[USB 隧道运维指南](docs/usb-tunnel.md)、[发布与验收流程](docs/release-process.md)。
 
@@ -88,6 +88,14 @@ device.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
 
 ```bat
 py -m asclient shot artifacts\bottom.png --crop-rel 0 0.5 1 1
+```
+
+本机模板可等待图标出现/消失，也可指定置信度：
+
+```python
+match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15)
+device.tap(*match.center)
+device.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
 ```
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：

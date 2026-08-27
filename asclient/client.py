@@ -55,6 +55,20 @@ class LogEntry:
     timestamp: str = ""
 
 
+@dataclass(frozen=True)
+class ImageMatch:
+    """A visual-template match in physical screen pixels."""
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float
+
+    @property
+    def center(self) -> tuple[float, float]:
+        return self.x + self.width / 2, self.y + self.height / 2
+
+
 class AScriptClient:
     """Client for one AScript device-service endpoint.
 
@@ -315,6 +329,73 @@ class AScriptClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self.screenshot_crop_relative(left, top, right, bottom))
         return destination.resolve()
+
+    @staticmethod
+    def _image_match(image: bytes, template: str | Path | bytes, *, confidence: float, region: tuple[float, float, float, float] | None) -> ImageMatch | None:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError("image matching requires Pillow; reinstall asclient to install its dependencies") from exc
+        if not math.isfinite(confidence) or not 0 < confidence <= 1:
+            raise ValueError("confidence must be a finite number in (0, 1]")
+        from io import BytesIO
+        source = Image.open(BytesIO(image)).convert("RGB")
+        template_image = Image.open(BytesIO(template) if isinstance(template, bytes) else str(template)).convert("RGB")
+        screen_width, screen_height = source.size; template_width, template_height = template_image.size
+        if template_width > screen_width or template_height > screen_height: return None
+        if region is None: left, top, right, bottom = 0, 0, 1, 1
+        else: left, top, right, bottom = (float(value) for value in region)
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
+            raise ValueError("region must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+        x0, y0, x1, y1 = int(screen_width * left), int(screen_height * top), int(screen_width * right), int(screen_height * bottom)
+        x1, y1 = min(x1, screen_width), min(y1, screen_height)
+        if x1 - x0 < template_width or y1 - y0 < template_height: return None
+        source_pixels, template_pixels = source.load(), template_image.load()
+        sample_x = sorted({round(index * (template_width - 1) / 7) for index in range(8)})
+        sample_y = sorted({round(index * (template_height - 1) / 7) for index in range(8)})
+        sample_count = len(sample_x) * len(sample_y) * 3; allowed = (1 - confidence) * 255 * sample_count
+        best: ImageMatch | None = None
+        for y in range(y0, y1 - template_height + 1):
+            for x in range(x0, x1 - template_width + 1):
+                error = 0
+                for ty in sample_y:
+                    for tx in sample_x:
+                        source_pixel, template_pixel = source_pixels[x + tx, y + ty], template_pixels[tx, ty]
+                        error += abs(source_pixel[0] - template_pixel[0]) + abs(source_pixel[1] - template_pixel[1]) + abs(source_pixel[2] - template_pixel[2])
+                        if error > allowed: break
+                    if error > allowed: break
+                score = 1 - error / (255 * sample_count)
+                if error <= allowed and (best is None or score > best.confidence): best = ImageMatch(x, y, template_width, template_height, score)
+        return best
+
+    def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[float, float, float, float] | None = None) -> ImageMatch | None:
+        """Find a local image template in the current screenshot."""
+        return self._image_match(self.screenshot(), template, confidence=confidence, region=region)
+
+    def wait_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None) -> ImageMatch:
+        """Wait until a local image template appears, then return its match."""
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        deadline = time.monotonic() + timeout
+        while True:
+            match = self.find_image(template, confidence=confidence, region=region)
+            if match is not None: return match
+            if time.monotonic() >= deadline: raise TimeoutError("image did not appear before timeout")
+            time.sleep(min(interval, deadline - time.monotonic()))
+
+    def wait_image_gone(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None) -> bool:
+        """Wait until a local image template is no longer present."""
+        if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")
+        deadline = time.monotonic() + timeout
+        while True:
+            if self.find_image(template, confidence=confidence, region=region) is None: return True
+            if time.monotonic() >= deadline: return False
+            time.sleep(min(interval, deadline - time.monotonic()))
+
+    def tap_image(self, template: str | Path | bytes, *, confidence: float = 0.9, timeout: float = 10.0, interval: float = 0.5, region: tuple[float, float, float, float] | None = None, duration_ms: int = 20) -> ImageMatch:
+        """Wait for a template and tap its center."""
+        match = self.wait_image(template, confidence=confidence, timeout=timeout, interval=interval, region=region)
+        self.tap(*match.center, duration_ms=duration_ms)
+        return match
 
     def capture_artifacts(self, destination: str | Path, *, prefix: str = "failure", mode: str = "smart") -> dict[str, Path]:
         """Save as much diagnostic evidence as a partially healthy device permits."""

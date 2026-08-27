@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.6.7`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.7.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -189,6 +189,25 @@ client.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
 ```
 
 实现无第三方依赖，支持移动端截图使用的非隔行 8 位 RGB/RGBA PNG；非标准 PNG 会抛出 `DeviceResponseError`。
+
+### `find_image()`、`wait_image()` 与 `wait_image_gone()`
+
+在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。`region=(left, top, right, bottom)` 可限制比例搜索区域。
+
+```python
+match = client.find_image("assets/login-icon.png", confidence=0.95)
+if match:
+    print(match.center)
+
+match = client.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, interval=0.5)
+client.tap(*match.center)
+client.wait_image_gone("assets/loading.png", confidence=0.90, timeout=20)
+
+# 等待后自动点击模板中心。
+client.tap_image("assets/continue.png", confidence=0.93, timeout=10)
+```
+
+模板匹配依赖 Pillow，随 `asclient` 一起安装。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
 
 ### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
 

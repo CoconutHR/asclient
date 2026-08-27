@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asclient"
-version = "0.6.7"
-description = "Dependency-free AScript local iOS device client"
+version = "0.7.0"
+description = "AScript local iOS device client"
 requires-python = ">=3.10"
+dependencies = ["Pillow>=9.0"]
 
 [project.scripts]
 asc = "asclient.cli:main"
