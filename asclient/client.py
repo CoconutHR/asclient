@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import ipaddress
 import json
 import math
@@ -131,7 +132,11 @@ class AScriptClient:
         property as a method, which fails on some Rubicon versions.
         """
         try:
-            return self._ok(self.json("GET", "/api/status")).get("data", {})
+            result = self._ok(self.json("GET", "/api/status")).get("data", {})
+            if not isinstance(result, dict):
+                raise DeviceResponseError("invalid status returned by device", body=repr(result))
+            self._attach_status_screen(result)
+            return result
         except DeviceOperationError as exc:
             issue = "ios_objc_property_callable" if "ObjCStrInstance" in str(exc) and "callable" in str(exc) else "device_status_error"
             result: dict[str, Any] = {
@@ -144,17 +149,24 @@ class AScriptClient:
                 },
                 "platform": self.ping(),
             }
-            try:
-                result["screen"] = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
-                result["compatibility"]["capabilities"]["screen"] = "available"
-            except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
-                result["compatibility"]["capabilities"]["screen"] = "unavailable"
+            self._attach_status_screen(result, result["compatibility"]["capabilities"])
             try:
                 result["current_app"] = self.current_app()
                 result["compatibility"]["capabilities"]["current_app"] = "available"
             except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
                 result["compatibility"]["capabilities"]["current_app"] = "unavailable"
             return result
+
+    def _attach_status_screen(self, result: dict[str, Any], capabilities: dict[str, Any] | None = None) -> None:
+        try:
+            result["logical_screen"] = self._logical_screen()
+        except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
+            pass
+        try:
+            result["screen"] = self.screen_size()
+            if capabilities is not None: capabilities["screen"] = "available"
+        except (DeviceOperationError, DeviceResponseError, DeviceConnectionError):
+            if capabilities is not None: capabilities["screen"] = "unavailable"
 
     def packages(self) -> list[Any]:
         """Return the installed package list reported by the iOS status API."""
@@ -229,8 +241,7 @@ class AScriptClient:
         """Return the current physical screen resolution used for actions.
 
         This is the same coordinate system as screenshots, OCR, ``tap`` and
-        ``swipe``.  Use :meth:`logical_size` only when handling raw view-tree
-        rectangles.
+        ``swipe``.
         """
         return self.action_size()
 
@@ -262,13 +273,19 @@ class AScriptClient:
         return result
 
     def ui_xml(self, *, mode: str = "smart", depth: int = 0, x: float = 0, y: float = 0) -> str:
-        return self.request("GET", "/api/node/dump", params={"mode": mode, "depth": depth, "x": x, "y": y}, timeout=30).decode("utf-8")
+        logical, action = self._coordinate_spaces()
+        raw = self.request("GET", "/api/node/dump", params={"mode": mode, "depth": depth, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}, timeout=30).decode("utf-8")
+        return self._scale_xml_coordinates(raw, action["width"] / logical["width"], action["height"] / logical["height"])
 
     def ui_tree(self, *, mode: str = "smart", selector: Optional[Mapping[str, Any]] = None, x: float = 0, y: float = 0) -> dict[str, Any]:
-        params: dict[str, Any] = {"mode": mode, "x": x, "y": y}
+        logical, action = self._coordinate_spaces()
+        params: dict[str, Any] = {"mode": mode, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}
         if selector is not None:
             params["selector"] = json.dumps(selector, ensure_ascii=False)
-        return self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
+        data = self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
+        if not isinstance(data, Mapping):
+            raise DeviceResponseError("invalid UI tree returned by device", body=repr(data))
+        return self._scale_tree_coordinates(dict(data), action["width"] / logical["width"], action["height"] / logical["height"], action)
 
     def find_elements(self, selector: Mapping[str, Any], *, mode: str = "smart", x: float = 0, y: float = 0) -> list[dict[str, Any]]:
         """Resolve an AScript selector and return its matching element metadata.
@@ -299,12 +316,7 @@ class AScriptClient:
     def tap(self, x: float, y: float, *, duration_ms: int = 20) -> Any:
         with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, duration_ms))
 
-    def logical_size(self) -> dict[str, float]:
-        """Return the iOS logical-point dimensions reported by AScript.
-
-        This low-level size is normally only useful for interpreting raw
-        ``ui_tree`` element rectangles.
-        """
+    def _logical_screen(self) -> dict[str, float]:
         value = self._ok(self.json("GET", "/api/screen/size")).get("data", {})
         try:
             width, height = float(value["width"]), float(value["height"])
@@ -313,6 +325,48 @@ class AScriptClient:
         if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
             raise DeviceResponseError(t("screen_size_invalid"), body=repr(value))
         return {"width": width, "height": height}
+
+    def _coordinate_spaces(self) -> tuple[dict[str, float], dict[str, float]]:
+        logical = self._logical_screen()
+        try:
+            action = self.screen_size()
+        except DeviceResponseError:
+            # A malformed screenshot must not make tree inspection unusable.
+            action = logical
+        return logical, action
+
+    @staticmethod
+    def _scale_tree_coordinates(tree: dict[str, Any], x_scale: float, y_scale: float, action: Mapping[str, float]) -> dict[str, Any]:
+        x_keys, y_keys = {"x", "left", "right", "center_x"}, {"y", "top", "bottom", "center_y"}
+        width_keys, height_keys = {"width", "widthPixels", "noncompatWidthPixels"}, {"height", "heightPixels", "noncompatHeightPixels"}
+        value = copy.deepcopy(tree)
+        def visit(item: Any) -> None:
+            if isinstance(item, dict):
+                for key, child in item.items():
+                    if isinstance(child, (int, float)) and not isinstance(child, bool):
+                        if key in x_keys or key in width_keys: item[key] = child * x_scale
+                        elif key in y_keys or key in height_keys: item[key] = child * y_scale
+                    else: visit(child)
+            elif isinstance(item, list):
+                for child in item: visit(child)
+        visit(value)
+        display = value.setdefault("config", {}).setdefault("display", {})
+        display["widthPixels"], display["heightPixels"] = action["width"], action["height"]
+        return value
+
+    @staticmethod
+    def _scale_xml_coordinates(xml: str, x_scale: float, y_scale: float) -> str:
+        import xml.etree.ElementTree as ET
+        if x_scale == 1 and y_scale == 1:
+            return xml
+        try: root = ET.fromstring(xml)
+        except ET.ParseError: return xml
+        for element in root.iter():
+            for key, scale in (("x", x_scale), ("width", x_scale), ("y", y_scale), ("height", y_scale)):
+                if key in element.attrib:
+                    try: element.attrib[key] = str(int(round(float(element.attrib[key]) * scale)))
+                    except ValueError: pass
+        return ET.tostring(root, encoding="unicode")
 
     def relative_point(self, x_ratio: float, y_ratio: float) -> tuple[float, float]:
         """Convert two 0..1 ratios into physical action coordinates.

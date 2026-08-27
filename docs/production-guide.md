@@ -197,7 +197,7 @@ client.input_text("hello", interval_ms=120)
 ocr_result = client.ocr()
 ```
 
-AScript 在 iOS 上存在两套坐标：`screen_size()`、截图、OCR、`tap` 和 `swipe` 使用物理像素；`logical_size()` 与控件树通常使用逻辑点。示例设备的逻辑尺寸为 `393 x 852`，截图/动作尺寸为 `1179 x 2556`。不要混用两者：绝对点击使用 Inspector 的 `Action coordinate` 或 `screen_size()`，语义控件使用 `UiObject.click()`（会自动换算）。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
+客户端所有普通坐标 API 均统一为物理像素：`screen_size()`、控件树、XML、截图、OCR、`tap` 和 `swipe`。示例设备的截图/动作尺寸为 `1179 x 2556`。只有 `status()["logical_screen"]` 保留移动端原始逻辑点，供协议诊断而非定位使用。绝对点击使用 Inspector 的 `Action coordinate` 或 `screen_size()`；语义控件使用 `UiObject.click()`。对于固定在屏幕相对位置的目标，优先使用 `tap_relative(x_ratio, y_ratio)` 或 `Device.click_rel(x_ratio, y_ratio)`；比例会在每次调用时依据当前物理动作尺寸换算，范围必须为 `0.0..1.0`。对于需要精确命中某个控件的场景，仍优先使用语义选择器。
 
 ## 6. Inspector 工作流
 

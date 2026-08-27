@@ -81,14 +81,12 @@ class Selector:
 class UiObject:
     """A resolved UI element.
 
-    Element rectangles use the view-tree coordinate system (normally iOS
-    logical points). ``click`` converts them to AScript action pixels.
+    Element rectangles and actions both use physical screen pixels.
     """
 
     device: "Device"
     info: Mapping[str, Any]
     selector: Selector
-    tree_size: tuple[float, float] | None = None
 
     @property
     def rect(self) -> dict[str, float]:
@@ -104,7 +102,7 @@ class UiObject:
     def exists(self) -> bool: return True
 
     def click(self) -> Any:
-        return self.device.client.tap(*self.device.tree_to_action_point(*self.center, tree_size=self.tree_size))
+        return self.device.client.tap(*self.center)
 
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any:
         self.click()
@@ -132,32 +130,7 @@ class Device:
         views = data.get("views") or []
         if not isinstance(views, list):
             raise ValueError("invalid element list returned by device")
-        tree_size = self.tree_coordinate_size(data)
-        return [UiObject(self, dict(item), selector, tree_size) for item in views if isinstance(item, Mapping)]
-
-    def tree_coordinate_size(self, tree: Mapping[str, Any]) -> tuple[float, float]:
-        """Return the coordinate space advertised by a view-tree response."""
-        display = tree.get("config", {}).get("display", {})
-        try:
-            width = float(display.get("widthPixels"))
-            height = float(display.get("heightPixels"))
-            if width > 0 and height > 0:
-                return width, height
-        except (AttributeError, TypeError, ValueError):
-            pass
-        logical = self.client.logical_size()
-        return logical["width"], logical["height"]
-
-    def tree_to_action_point(self, x: float, y: float, *, tree_size: tuple[float, float] | None = None) -> tuple[float, float]:
-        """Map a view-tree point into physical action coordinates."""
-        if tree_size is None:
-            logical = self.client.logical_size()
-            tree_size = logical["width"], logical["height"]
-        tree_width, tree_height = tree_size
-        if tree_width <= 0 or tree_height <= 0:
-            raise ValueError("view-tree coordinate space must be positive")
-        action = self.client.action_size()
-        return float(x) * action["width"] / tree_width, float(y) * action["height"] / tree_height
+        return [UiObject(self, dict(item), selector) for item in views if isinstance(item, Mapping)]
 
     def find(self, selector: Selector, *, timeout: float = 0) -> UiObject | None:
         return UiCollection(self, selector).get(timeout=timeout)

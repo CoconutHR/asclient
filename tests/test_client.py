@@ -37,6 +37,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path); Handler.calls.append(("GET", parsed.path, parse_qs(parsed.query), b""))
         if parsed.path == "/api/screen/capture": return self._reply(b"PNG", content_type="image/png")
+        if parsed.path == "/api/screen/size": return self._reply({"code": 1, "data": {"width": 100, "height": 200}})
         if parsed.path == "/api/node/dump": return self._reply(b"<App/>", content_type="application/xml")
         if parsed.path == "/api/node/package": return self._reply({"code": 1, "data": {"name": "Example App", "bundle_id": "com.example.app", "pid": 42}})
         if parsed.path == "/api/tool/view/dump": return self._reply({"code": 1, "data": {"config": {"display": {"widthPixels": 100, "heightPixels": 200}}, "views": [{"type": "XCUIElementTypeButton", "name": "confirm", "label": "Confirm", "x": 10, "y": 20, "width": 30, "height": 40, "childs": []}]}})
@@ -90,7 +91,6 @@ class ClientTests(unittest.TestCase):
         try:
             self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1179).to_bytes(4, "big") + (2556).to_bytes(4, "big")
             self.assertEqual(self.client.screen_size(), {"width": 1179.0, "height": 2556.0})
-            self.assertEqual(self.client.logical_size(), {"width": 393.0, "height": 852.0})
             self.assertEqual(self.client.relative_point(0.5, 0.92), (589.5, 2351.52))
             self.assertEqual(self.client.relative_point(1, 1), (1178.0, 2555.0))
             tapped = []
@@ -102,23 +102,42 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.client.relative_point(-0.1, 0.5)
         with self.assertRaises(ValueError): self.client.relative_point(float("nan"), 0.5)
 
+    def test_ui_tree_coordinates_are_normalized_to_action_pixels(self):
+        original_screenshot = self.client.screenshot
+        try:
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (300).to_bytes(4, "big") + (600).to_bytes(4, "big")
+            tree = self.client.ui_tree(x=150, y=300)
+        finally:
+            self.client.screenshot = original_screenshot
+        node = tree["views"][0]
+        self.assertEqual((node["x"], node["y"], node["width"], node["height"]), (30.0, 60.0, 90.0, 120.0))
+        self.assertEqual(tree["config"]["display"]["widthPixels"], 300.0)
+        lookup = next(call for call in Handler.calls if call[1] == "/api/tool/view/dump")
+        self.assertEqual(lookup[2]["x"], ["50.0"])
+        self.assertEqual(lookup[2]["y"], ["100.0"])
+
     def test_operation_error(self):
         with self.assertRaises(DeviceOperationError): self.client._ok({"code": -1, "msg": "bad request"})
 
     def test_status_falls_back_when_the_device_reports_a_status_error(self):
-        original = self.client.json
+        original, original_screenshot = self.client.json, self.client.screenshot
         def fake_json(method, path, **kwargs):
             if path == "/api/status": return {"code": -1, "msg": "ObjCStrInstance object is not callable"}
             if path == "/api/screen/size": return {"code": 1, "data": {"width": 100, "height": 200}}
             if path == "/api/node/package": return {"code": 1, "data": {"bundle_id": "example"}}
             return original(method, path, **kwargs)
-        self.client.json = fake_json
-        status = self.client.status()
+        try:
+            self.client.json = fake_json
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (300).to_bytes(4, "big") + (600).to_bytes(4, "big")
+            status = self.client.status()
+        finally:
+            self.client.json, self.client.screenshot = original, original_screenshot
         self.assertTrue(status["available"])
         self.assertEqual(status["health"], "degraded")
         self.assertEqual(status["compatibility"]["status_api"]["issue"], "ios_objc_property_callable")
         self.assertEqual(status["compatibility"]["capabilities"]["screen"], "available")
-        self.assertEqual(status["screen"]["width"], 100)
+        self.assertEqual(status["screen"]["width"], 300)
+        self.assertEqual(status["logical_screen"]["width"], 100)
 
     def test_packages_uses_eval_when_status_has_no_package_list(self):
         original_status, original_eval = self.client.status, self.client.eval_python

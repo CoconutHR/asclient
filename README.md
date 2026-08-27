@@ -77,7 +77,7 @@ device.selector().at(200, 600)
 device.click_rel(0.5, 0.92)
 ```
 
-坐标规则：`screen_size()`、`action_size()`、截图、OCR 与 `tap`/`swipe` 都使用物理像素（该设备为 `1179 x 2556`）。只有需要直接解读原始控件树矩形时才使用 `logical_size()`（该设备为 `393 x 852` 逻辑点）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的 `Action coordinate`。
+坐标规则：`screen_size()`、`action_size()`、控件树、截图、OCR 与 `tap`/`swipe` 都使用物理像素（该设备为 `1179 x 2556`）。比例 API 与 `UiObject.click()` 已自动完成换算，绝对坐标请使用 Inspector 显示的 `Action coordinate`。只有 `status()["logical_screen"]` 会显式提供移动端原始逻辑点，供协议诊断使用。
 
 生产工作流建议使用 `Run`。它会将同一设备的动作串行化，并为每一步写入独立证据目录：
 

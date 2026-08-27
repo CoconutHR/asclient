@@ -1,6 +1,6 @@
 # ASClient API 使用参考
 
-本文对应 ASClient `0.6.5`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
+本文对应 ASClient `0.6.6`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [production-guide.md](production-guide.md)。
 
 ## 1. 快速选择接口
 
@@ -191,7 +191,7 @@ print(artifacts)  # screenshot/xml/context 中实际成功写入的路径
 
 ### `ui_xml(*, mode="smart", depth=0, x=0, y=0) -> str`
 
-读取原始 XML 控件树。
+读取已归一化为物理像素坐标的 XML 控件树。
 
 | 参数 | 说明 |
 | --- | --- |
@@ -210,7 +210,7 @@ Path("artifacts/tree.xml").write_text(xml, encoding="utf-8")
 
 ```python
 {
-    "config": {"display": {"widthPixels": 393, "heightPixels": 852}, ...},
+    "config": {"display": {"widthPixels": 1179, "heightPixels": 2556}, ...},
     "views": [{"type": "XCUIElementTypeApplication", "childs": [...]}],
 }
 ```
@@ -403,23 +403,22 @@ with Run(device, artifacts_root="artifacts") as run:
 client.tap(200, 600)
 ```
 
-### `screen_size()`、`action_size()`、`logical_size()`、`relative_point()` 与 `tap_relative()`
+### `screen_size()`、`action_size()`、`relative_point()` 与 `tap_relative()`
 
 `screen_size()` 返回当前真实物理分辨率，且与 `action_size()` 同义；两者都读取当前 PNG 截图头。以 iPhone 393 x 852 点、3 倍截图为例，返回 `1179 x 2556`。`tap`、`swipe`、截图、OCR 与 Inspector 的 `Action coordinate` 都使用物理像素。
 
-`logical_size()` 返回移动端服务原始的 iOS 逻辑点尺寸 `393 x 852`。保留它是为了处理原始 `ui_tree()` 控件矩形，而不是用于绝对点击；`UiObject.click()` 已自动完成点到像素的换算。
+客户端对控件树的 `x/y/width/height`、`ui_tree(..., x, y)` 点探测参数和 XML 坐标也统一使用物理像素，`UiObject.click()` 因而可直接使用控件中心点。只有 `status()["logical_screen"]` 显式保留服务端返回的逻辑点尺寸，用于诊断移动端协议。
 
 比例 API 始终依据 `action_size()` 换算，适合固定在“屏幕中部”“底部按钮区域”等相对位置的操作。比例必须是 `0.0` 到 `1.0` 的有限数字：`0.0` 表示左/上边缘，`1.0` 会夹紧到最后一个有效像素，避免越界。换算发生在每次调用时，因此会适应不同设备尺寸和当前横竖屏。`UiObject.click()` 同样会将控件树的逻辑点自动换算为动作像素。
 
 ```python
 screen = client.screen_size()               # {"width": 1179.0, "height": 2556.0}
-logical = client.logical_size()             # {"width": 393.0, "height": 852.0}
 x, y = client.relative_point(0.5, 0.92)    # (589.5, 2351.52)
 client.tap_relative(0.5, 0.92)             # 点击宽度 50%、高度 92% 的位置
 client.swipe_relative(0.5, 0.8, 0.5, 0.2)
 ```
 
-高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。控件树的 `x/y/width/height` 仍按树自身坐标返回，应该通过 `UiObject.click()` 触发自动换算，而不是手工将树节点中心直接传入 `tap`。
+高层对象 API 提供同等入口：`device.click_relative(0.5, 0.92)`；`device.click_rel(0.5, 0.92)` 是便于迁移的短别名。控件树的 `x/y/width/height` 可直接用于同一物理像素坐标系内的绝对动作。
 
 ### `swipe(x1, y1, x2, y2, *, duration_ms=200)`
 
