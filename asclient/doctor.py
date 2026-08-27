@@ -50,8 +50,12 @@ def diagnose(client: AScriptClient, config: Mapping[str, Any]) -> list[DoctorChe
     found = _executable_path(executable)
     if found:
         checks.append(DoctorCheck("iproxy", "ok", t("doctor_iproxy_found", path=found)))
-    else:
+    elif client.address.host in {"127.0.0.1", "localhost"}:
+        # USB 隧道场景（回环地址）确实需要 iproxy，缺失即为错误。
         checks.append(DoctorCheck("iproxy", "error", t("doctor_iproxy_missing"), executable))
+    else:
+        # 纯 Wi-Fi 场景不需要 iproxy；缺失只提醒，不让 doctor 返回失败退出码。
+        checks.append(DoctorCheck("iproxy", "warning", t("doctor_iproxy_missing_optional"), executable))
     host = str(options.get("local_host", "127.0.0.1"))
     ports = [("service_port", int(options.get("local_port", 9096)))]
     if bool(options.get("forward_logs", True)):

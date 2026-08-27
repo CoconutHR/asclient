@@ -56,14 +56,40 @@ def _confirm(args: argparse.Namespace, client: AScriptClient, action: str) -> No
 
 
 _HELP: dict[str, tuple[str, str]] = {
+    "ping": ("ping\n探测设备服务并返回平台（iOS/Android）。", "ping\nProbe the device service and report its platform (iOS/Android)."),
+    "help": ("help [命令]\n显示全部命令速查或单个命令的详细说明。", "help [COMMAND]\nShow the command overview or details for one command."),
+    "doctor": ("doctor [--report FILE] [--fix-iproxy PATH] [--yes]\n诊断本地工具、端口、设备服务和日志服务；仅在 --yes 确认后写入安全配置修复。", "doctor [--report FILE] [--fix-iproxy PATH] [--yes]\nDiagnose local tools, ports, device service, and logs; write safe fixes only after --yes confirmation."),
     "status": ("status\n查看设备可用性、屏幕尺寸和当前前台应用。", "status\nShow availability, screen size, and foreground app."),
-    "doctor": ("doctor [--fix-iproxy PATH] [--yes]\n诊断本地工具、端口、设备服务和日志服务；仅在 --yes 确认后写入安全配置修复。", "doctor [--fix-iproxy PATH] [--yes]\nDiagnose local tools, ports, device service, and logs; write safe fixes only after --yes confirmation."),
-    "tunnel": ("tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs]\n通过 USB 同时转发控制端口 9096 和日志端口 10102。", "tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs]\nForward USB control port 9096 and log port 10102."),
-    "inspect": ("inspect\n启动本机 Inspector，查看截图、控件树、前台包名和坐标。", "inspect\nStart the local Inspector for screenshots, trees, foreground app, and coordinates."),
-    "deploy": ("deploy PROJECT ENTRY [--logs SECONDS]\n上传入口文件、运行项目、收集日志并保存截图。需要 --yes。", "deploy PROJECT ENTRY [--logs SECONDS]\nUpload an entry file, run the project, collect logs, and save a screenshot. Requires --yes."),
-    "log": ("log [SECONDS]\n读取设备日志回显；USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS]\nRead device log output; USB mode requires tunnel to forward 10102."),
-    "tap": ("tap X Y\n在真机坐标点击。需要 --yes。", "tap X Y\nTap a device coordinate. Requires --yes."),
-    "tap-rel": ("tap-rel X_RATIO Y_RATIO\n按屏幕宽高比例点击，例如 0.5 0.92。需要 --yes。", "tap-rel X_RATIO Y_RATIO\nTap using screen ratios, for example 0.5 0.92. Requires --yes."),
+    "pkgs": ("pkgs\n列出设备端 Python 包。", "pkgs\nList device-side Python packages."),
+    "app": ("app\n显示当前前台应用信息。", "app\nShow the foreground app."),
+    "shot": ("shot [输出.png] [--crop-rel 左 上 右 下]\n保存真机截图，可按屏幕比例裁剪。", "shot [OUTPUT.png] [--crop-rel LEFT TOP RIGHT BOTTOM]\nSave a device screenshot with an optional relative crop."),
+    "dump": ("dump [输出.xml] [--mode MODE]\n保存 XML 控件树；mode 可为 smart/full/point。", "dump [OUTPUT.xml] [--mode MODE]\nSave the XML control tree; mode can be smart/full/point."),
+    "observe": ("observe [--prefix 前缀]\n同时保存截图与 XML 控件树。", "observe [--prefix PREFIX]\nSave a screenshot and the XML control tree together."),
+    "inspect": ("inspect [--host HOST] [--port PORT] [--no-browser]\n启动本机 Inspector，查看截图、控件树、前台应用和坐标。", "inspect [--host HOST] [--port PORT] [--no-browser]\nStart the local Inspector for screenshots, trees, foreground app, and coordinates."),
+    "tunnel": ("tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]\n通过 USB 同时转发控制端口 9096 和日志端口 10102。", "tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]\nForward USB control port 9096 and log port 10102."),
+    "eval": ("eval CODE\n执行受信任的设备端 Python。需要 --yes。", "eval CODE\nRun trusted device-side Python. Requires --yes."),
+    "cat": ("cat 远程路径 [输出文件]\n打印或保存设备端文件。", "cat REMOTE_PATH [OUTPUT]\nPrint or save a device-side file."),
+    "ocr": ("ocr [rect]\n识别屏幕文字（设备端 OCR）。", "ocr [rect]\nRecognize on-screen text with device OCR."),
+    "findcolor": ("findcolor COLORS [--diff FLOAT]\n查找颜色组合。", "findcolor COLORS [--diff FLOAT]\nFind a color combination on screen."),
+    "compare": ("compare COLORS [--diff FLOAT]\n比对指定颜色组合。", "compare COLORS [--diff FLOAT]\nCompare the given color combination."),
+    "ls": ("ls\n列出设备项目。", "ls\nList device projects."),
+    "create": ("create PROJECT\n创建项目。需要 --yes。", "create PROJECT\nCreate a project. Requires --yes."),
+    "rename": ("rename PROJECT NEW_NAME\n重命名项目。需要 --yes。", "rename PROJECT NEW_NAME\nRename a project. Requires --yes."),
+    "remove": ("remove PROJECT\n删除项目（破坏性）。需要 --yes。", "remove PROJECT\nDelete a project (destructive). Requires --yes."),
+    "files": ("files PROJECT\n查看项目文件树。", "files PROJECT\nShow a project's file tree."),
+    "push": ("push PROJECT SOURCE [REMOTE]\n上传单个文件或整个目录到项目。需要 --yes。", "push PROJECT SOURCE [REMOTE]\nUpload one file or a directory into a project. Requires --yes."),
+    "pull": ("pull PROJECT [OUTPUT]\n下载项目文件到本机。", "pull PROJECT [OUTPUT]\nDownload project files to this machine."),
+    "run": ("run PROJECT\n运行项目的 __init__.py。需要 --yes。", "run PROJECT\nRun a project's __init__.py. Requires --yes."),
+    "stop": ("stop\n停止当前项目。需要 --yes。", "stop\nStop the current project. Requires --yes."),
+    "log": ("log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]\n读取设备日志回显；不传秒数时默认读取 3 秒。USB 模式需要 tunnel 同时映射 10102。", "log [SECONDS] [--reconnects N] [--output FILE] [--contains TEXT]\nRead device log output for the given seconds (default 3). USB mode requires tunnel to forward 10102."),
+    "deploy": ("deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]\n上传入口文件、运行项目、收集日志（默认 5 秒）并保存截图。需要 --yes。", "deploy PROJECT ENTRY [--logs SECONDS] [--screenshot FILE]\nUpload an entry file, run the project, collect logs (default 5 seconds), and save a screenshot. Requires --yes."),
+    "tap": ("tap X Y [--duration MS]\n在真机坐标点击。需要 --yes。", "tap X Y [--duration MS]\nTap a device coordinate. Requires --yes."),
+    "tap-rel": ("tap-rel X_RATIO Y_RATIO [--duration MS]\n按屏幕宽高比例点击，例如 0.5 0.92。需要 --yes。", "tap-rel X_RATIO Y_RATIO [--duration MS]\nTap using screen ratios, for example 0.5 0.92. Requires --yes."),
+    "swipe": ("swipe X1 Y1 X2 Y2 [--duration MS]\n从起点滑动到终点。需要 --yes。", "swipe X1 Y1 X2 Y2 [--duration MS]\nSwipe from one point to another. Requires --yes."),
+    "swipe-rel": ("swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]\n按屏幕宽高比例滑动，例如 0.5 0.8 0.5 0.2。需要 --yes。", "swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS]\nSwipe using screen ratios, for example 0.5 0.8 0.5 0.2. Requires --yes."),
+    "input": ("input TEXT [--interval MS]\n向当前焦点输入文本。需要 --yes。", "input TEXT [--interval MS]\nType text into the focused control. Requires --yes."),
+    "home": ("home\n执行 Home 操作。需要 --yes。", "home\nPress Home on the device. Requires --yes."),
+    "api": ("api METHOD PATH [--params JSON] [--form JSON]\n调用已确认但未封装的原始端点。需要 --yes。", "api METHOD PATH [--params JSON] [--form JSON]\nCall a confirmed but unwrapped API endpoint. Requires --yes."),
 }
 
 
@@ -185,6 +211,9 @@ def _parser() -> argparse.ArgumentParser:
     inp = commands.add_parser("input"); inp.add_argument("text"); inp.add_argument("--interval", type=int, default=120)
     raw = commands.add_parser("api", help="call a confirmed but unwrapped API endpoint")
     raw.add_argument("method"); raw.add_argument("path"); raw.add_argument("--params", default="{}"); raw.add_argument("--form", default="{}")
+    # 允许 --yes 写在子命令之后，等价于写在全局位置；SUPPRESS 避免覆盖全局值。
+    for command in commands.choices.values():
+        command.add_argument("--yes", action="store_true", default=argparse.SUPPRESS, help="confirm a state-changing operation (same as the global --yes)")
     return parser
 
 

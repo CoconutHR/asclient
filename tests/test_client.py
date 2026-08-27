@@ -67,6 +67,9 @@ class ClientTests(unittest.TestCase):
 
     def setUp(self):
         Handler.calls.clear()
+        # 文案断言固定为英文，避免测试结果依赖操作系统语言。
+        set_language("en")
+        self.addCleanup(set_language, None)
 
     def test_ping_screenshot_and_ui_xml(self):
         self.assertEqual(self.client.ping(), "iOS")
@@ -432,6 +435,26 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(manifest["outcome"], "passed")
             self.assertEqual(manifest["steps"][1]["outcome"], "failed")
             self.assertTrue((Path(directory) / "unit-run" / "expected_failure_failure.json").is_file())
+
+    def test_run_label_keeps_unicode_and_sanitizes_unsafe_characters(self):
+        from asclient.run import _label
+        self.assertEqual(_label("填写用户名"), "填写用户名")
+        self.assertEqual(_label("打开/登录: 第二步"), "打开_登录_第二步")
+        self.assertEqual(_label("step 1."), "step_1")
+        self.assertEqual(_label("///"), "step")
+
+    def test_cli_accepts_yes_after_the_subcommand(self):
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            status = main(["--device", f"127.0.0.1:{self.server.server_port}", "remove", "demo", "--yes"])
+        self.assertEqual(status, 0)
+        self.assertTrue(any(call[1] == "/api/module/remove" for call in Handler.calls))
+
+    def test_help_documents_every_cli_command(self):
+        from argparse import _SubParsersAction
+        from asclient.cli import _HELP, _parser
+        choices = next(action.choices for action in _parser()._actions if isinstance(action, _SubParsersAction))
+        self.assertEqual(set(choices), set(_HELP))
 
     def test_inspector_serves_a_loopback_snapshot(self):
         from asclient.inspector import serve

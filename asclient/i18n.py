@@ -102,6 +102,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "doctor_error": ("错误", "error"),
     "doctor_iproxy_found": ("已找到 iproxy：{path}", "iproxy found: {path}"),
     "doctor_iproxy_missing": ("未找到 iproxy。无法自动安装第三方二进制；请安装受信任的 libimobiledevice，或用 doctor --fix-iproxy <路径> 写入已有 iproxy 的绝对路径。", "iproxy was not found. Third-party binaries are never installed automatically; install a trusted libimobiledevice build or use doctor --fix-iproxy <path> to save an existing iproxy path."),
+    "doctor_iproxy_missing_optional": ("未找到 iproxy。仅 USB 隧道需要它，而当前 device.address 不是本机回环地址，可忽略本项。如需使用 USB，请安装受信任的 libimobiledevice，或用 doctor --fix-iproxy <路径> 写入已有 iproxy 的绝对路径。", "iproxy was not found. Only USB tunnels need it and device.address is not a loopback address, so this check can be ignored. To use USB, install a trusted libimobiledevice build or use doctor --fix-iproxy <path> to save an existing iproxy path."),
     "doctor_port_available": ("本机端口 {host}:{port} 可用于建立隧道", "local port {host}:{port} is available for a tunnel"),
     "doctor_port_busy": ("本机端口 {host}:{port} 已被占用。不会自动结束其他程序；请关闭占用程序或在配置中使用其他 local_port。", "local port {host}:{port} is already in use. Other processes are never stopped automatically; close the owner or configure a different local_port."),
     "doctor_port_tunnel": ("本机端口 {host}:{port} 正由活动 USB 隧道使用。", "local port {host}:{port} is in use by an active USB tunnel."),

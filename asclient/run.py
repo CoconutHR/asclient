@@ -19,7 +19,10 @@ T = TypeVar("T")
 
 
 def _label(value: str) -> str:
-    result = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    """清理步骤名使其可安全用作证据文件名，同时保留中文等 Unicode 文本。"""
+    # 仅替换文件名中不安全的字符（路径分隔符、Windows 保留标点、控制字符等），
+    # 保证中文步骤名生成的证据文件名仍可读、可区分。
+    result = re.sub(r"[^\w.-]+", "_", value).strip(" ._")
     return result or "step"
 
 
