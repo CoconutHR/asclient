@@ -52,8 +52,18 @@ device(text="登录").click()             # 确认无误后再点击
 | 按屏幕比例点击（底部中央） | `device.click_rel(0.5, 0.92)` |
 | 按屏幕比例滑动 | `client.swipe_relative(0.5, 0.8, 0.5, 0.2)` |
 | 识别屏幕文字 | `client.ocr()` |
+| 找含“登录”二字的 OCR 文本（含坐标） | `client.find_ocr_text("登录")` |
+| 等屏幕出现指定文字 | `client.wait_ocr_text("登录成功", timeout=10)` |
 | 读取一个像素的 RGB/HEX | `client.pixel(100, 200).rgb` / `.hex` |
 | 按比例读取像素颜色 | `client.pixel_relative(0.5, 0.92)` |
+| 断言某点是某颜色（带容差） | `client.assert_color(100, 200, "#FFFFFF", tolerance=3)` |
+| 区域内找/数某种颜色 | `client.find_color("#FF0000", region=(0, 1800, 1179, 2556))` / `client.count_color(...)` |
+| 长按 / 双击（绝对坐标） | `client.long_press(600, 1200, duration=0.8)` / `client.double_tap(600, 1200)` |
+| 按比例长按 / 双击 | `client.long_press_relative(0.5, 0.5, duration=0.8)` |
+| 拖拽（绝对 / 比例） | `client.drag(200, 1000, 900, 1000, duration=0.5)` / `client.drag_relative(0.2, 0.5, 0.8, 0.5)` |
+| 元素长按 / 双击 / 拖到某点 | `element.long_click()` / `element.double_click()` / `element.drag_to(800, 1200)` |
+| 等目标 App 成为前台 | `client.wait_current_app("com.example.app", timeout=10)` |
+| 查到唯一元素才点击（锁内原子） | `device.click_if_unique(device.selector().name("提交"))` |
 | 一帧中找多个模板 | `client.find_images({"成功": "success.png", "失败": "failure.png"})` |
 | 等待任意页面结果 | `name, match = client.wait_any_image({...}, timeout=20)` |
 | 本地快照关系查询 | `device.snapshot()(name="表单").child(device.selector().text("提交"))` |

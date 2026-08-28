@@ -45,7 +45,6 @@ def main() -> None:
         #    / \ : 等文件名非法字符会被替换为下划线。
         username = run.assert_unique(device.selector().name(USERNAME_INPUT), name="断言用户名输入框")
         password = run.assert_unique(device.selector().name(PASSWORD_INPUT), name="断言密码输入框")
-        submit = run.assert_unique(device.selector().text(LOGIN_BUTTON), name="断言登录按钮")
 
         # 2. 填写表单。set_text 会先点击控件取得焦点再输入；
         #    带参数的动作用 lambda 包装后交给 run.step 记录耗时。
@@ -54,10 +53,16 @@ def main() -> None:
 
         # 3. 点击登录并等待首页标识。wait 超时会先采集失败证据再抛出异常，
         #    避免后续步骤在错误页面上继续执行。
-        run.step("点击登录", submit.click, capture_after=True)
+        #    click_if_unique 在同一设备锁内查询唯一元素并立即点击：
+        #    0 个或多个匹配都会抛 LookupError，避免 exists + click 的竞态。
+        run.step("点击登录", lambda: device.click_if_unique(device.selector().text(LOGIN_BUTTON)), capture_after=True)
         run.wait(device.selector().name(HOME_MARK), timeout=15, name="等待首页")
 
-        # 4. 如登录过程有 loading 遮罩，可在点击后用模板等待其消失；
+        # 4. 如登录结果二选一（成功页 / 错误提示），可用模板等待任一出现：
+        # name, match = device.wait_any_image(
+        #     {"成功": "assets/success.png", "失败": "assets/failure.png"}, timeout=20,
+        # )
+        # 5. 如登录过程有 loading 遮罩，可在点击后用模板等待其消失；
         #    模板图片由 Inspector 的“裁剪保存”生成，放于 assets/ 目录：
         # device.client.wait_image_gone("assets/loading.png", timeout=20)
 
