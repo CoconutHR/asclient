@@ -4,6 +4,7 @@ import socket
 import struct
 import tempfile
 import threading
+import time
 import unittest
 import zlib
 from contextlib import redirect_stderr, redirect_stdout
@@ -70,6 +71,8 @@ class ClientTests(unittest.TestCase):
         # 文案断言固定为英文，避免测试结果依赖操作系统语言。
         set_language("en")
         self.addCleanup(set_language, None)
+        # 坐标缓存按测试隔离，避免跨用例泄漏尺寸。
+        self.client._space_cache = None
 
     def test_ping_screenshot_and_ui_xml(self):
         self.assertEqual(self.client.ping(), "iOS")
@@ -190,7 +193,7 @@ class ClientTests(unittest.TestCase):
         original_find_all = device.find_all
         output = StringIO()
         try:
-            device.find_all = lambda selector: []
+            device.find_all = lambda selector, *, normalize=True: []
             with redirect_stdout(output): self.assertIsNone(device.find(device.selector().name("missing"), timeout=0, log=True))
         finally:
             device.find_all = original_find_all
@@ -715,10 +718,10 @@ class ClientTests(unittest.TestCase):
         button = UiObject(device, {"x": 10, "y": 20, "width": 30, "height": 40}, device.selector().name("submit"))
         original_tap = self.client.tap; self.client.tap = lambda *args, **kwargs: clicks.append((args, kwargs))
         try:
-            device.find_all = lambda selector: [button]
+            device.find_all = lambda selector, *, normalize=True: [button]
             self.assertIs(device.click_if_unique(device.selector().name("submit")), button)
             self.assertEqual(clicks[0][0], (25.0, 40.0))
-            device.find_all = lambda selector: [button, button]
+            device.find_all = lambda selector, *, normalize=True: [button, button]
             with self.assertRaises(LookupError): device.click_if_unique(device.selector().name("submit"))
         finally:
             device.find_all, self.client.tap = original_find, original_tap
@@ -732,6 +735,79 @@ class ClientTests(unittest.TestCase):
         self.assertEqual((explicit_ms.duration, explicit_ms.duration_ms, explicit_ms.duration_s), (None, 450, None))
         self.assertEqual((seconds.duration, seconds.duration_ms, seconds.duration_s), (None, None, .45))
         with self.assertRaises(SystemExit): _parser().parse_args(["tap", "1", "2", "--duration", "450", "--duration-s", ".45"])
+
+    def test_coordinate_cache_and_normalize_fast_path_reduce_requests(self):
+        original_json, original_screenshot = self.client.json, self.client.screenshot
+        size_calls, capture_calls = [], []
+        def fake_json(method, path, **kwargs):
+            if path == "/api/screen/size": size_calls.append(1); return {"code": 1, "data": {"width": 393, "height": 852}}
+            return original_json(method, path, **kwargs)
+        try:
+            self.client.json = fake_json
+            self.client.screenshot = lambda: capture_calls.append(1) or b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1179).to_bytes(4, "big") + (2556).to_bytes(4, "big")
+            self.client.ui_tree()                       # 冷启动：size + 截图 + 树
+            self.client.ui_tree()                       # 命中缓存：只有树请求
+            self.client.ui_tree(normalize=False)        # 快速路径：只有树请求，且无 x/y
+            fast = [call for call in Handler.calls if call[1] == "/api/tool/view/dump"][-1]
+        finally:
+            self.client.json, self.client.screenshot = original_json, original_screenshot
+        self.assertEqual(len(size_calls), 1)
+        self.assertEqual(len(capture_calls), 1)
+        self.assertEqual(len([call for call in Handler.calls if call[1] == "/api/tool/view/dump"]), 3)
+        self.assertNotIn("x", fast[2])
+        with self.assertRaises(ValueError): self.client.ui_tree(x=5, normalize=False)
+        self.client.coordinate_cache_ttl = 0
+        self.client._space_cache = None
+
+    def test_exists_and_count_use_the_fast_path_without_coordinates(self):
+        device = Device(self.client); calls = []
+        original = device.find_all
+        device.find_all = lambda selector, *, normalize=True: calls.append(normalize) or []
+        try:
+            self.assertFalse(device(name="missing").exists)
+            self.assertEqual(device(name="missing").count, 0)
+            self.assertTrue(device(name="missing").wait_gone(timeout=0))
+        finally:
+            device.find_all = original
+        self.assertEqual(set(calls), {False})
+
+    def test_scroll_until_element_returns_match_and_swipes_when_missing(self):
+        device = Device(self.client); original_tree, original_swipe = self.client.ui_tree, self.client.swipe_relative
+        trees = [
+            {"views": [{"name": "header", "childs": []}]},
+            {"views": [{"name": "header", "childs": []}]},
+            {"views": [{"name": "target_button", "childs": []}]},
+        ]
+        swipes = []
+        self.client.ui_tree = lambda **kwargs: trees.pop(0)
+        self.client.swipe_relative = lambda *args, **kwargs: swipes.append((args, kwargs))
+        try:
+            found = device.scroll_until_element(device.selector().name("target_button"), interval=0.001, initial_delay=False)
+            self.assertEqual(found.info["name"], "target_button")
+            swipes_before = len(swipes)
+            trees.extend([{"views": []}] * 3)
+            with self.assertRaises(LookupError):
+                device.scroll_until_element({"a": device.selector().name("x"), "b": device.selector().name("y")}, max_swipes=2, interval=0.001, initial_delay=False)
+            self.assertEqual(len(swipes) - swipes_before, 2)
+            self.assertEqual(swipes[0][0], (0.5, 0.2, 0.5, 0.8))
+        finally:
+            self.client.ui_tree, self.client.swipe_relative = original_tree, original_swipe
+
+    def test_watcher_clicks_matching_elements_and_stops(self):
+        device = Device(self.client); original_tree = self.client.ui_tree
+        clicks = []; original_tap = self.client.tap
+        self.client.tap = lambda *args, **kwargs: clicks.append(args)
+        self.client.ui_tree = lambda **kwargs: {"views": [{"name": "popup", "x": 10, "y": 20, "width": 30, "height": 40, "childs": []}]}
+        try:
+            with device.watch(device.selector().name("popup"), interval=0.05, log=False) as watcher:
+                deadline = time.monotonic() + 3
+                while watcher.trigger_count == 0 and time.monotonic() < deadline: time.sleep(0.02)
+            self.assertEqual(clicks, [(25.0, 40.0)])
+            self.assertEqual(watcher.triggered, ["rule_0"])
+            self.assertFalse(watcher.is_running)
+            self.assertEqual(watcher.errors, [])
+        finally:
+            self.client.ui_tree, self.client.tap = original_tree, original_tap
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve

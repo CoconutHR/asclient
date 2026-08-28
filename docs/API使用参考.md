@@ -24,7 +24,7 @@ device = connect("192.168.3.17:9096")
 
 ## 2. 地址、连接与异常
 
-### `AScriptClient(address, *, password="", timeout=15.0, retries=1)`
+### `AScriptClient(address, *, password="", timeout=15.0, retries=1, coordinate_cache_ttl=1.0)`
 
 创建低层客户端。
 
@@ -298,7 +298,7 @@ xml = client.ui_xml(mode="smart")
 Path("artifacts/tree.xml").write_text(xml, encoding="utf-8")
 ```
 
-### `ui_tree(*, mode="smart", selector=None, x=0, y=0) -> dict`
+### `ui_tree(*, mode="smart", selector=None, x=0, y=0, normalize=True) -> dict`
 
 读取结构化树；无 `selector` 时一般返回：
 
@@ -311,7 +311,9 @@ Path("artifacts/tree.xml").write_text(xml, encoding="utf-8")
 
 传入 `selector` 时，服务端返回匹配元素的扁平 `views`。此参数是设备端协议格式，业务代码优先使用 `Device`/`Selector`，不要手写该 JSON。
 
-### `find_elements(selector, *, mode="smart", x=0, y=0) -> list[dict]`
+坐标空间（逻辑尺寸 + 截图物理尺寸）按 `coordinate_cache_ttl`（默认 1 秒）短时缓存，轮询查询从每轮 3 次设备往返降到 1 次；旋转屏幕会改变物理尺寸，旋转敏感的流程可设 `coordinate_cache_ttl=0` 关闭缓存。`normalize=False` 跳过坐标空间探测与归一化，整个查询只有一次树请求，返回的节点坐标为设备端逻辑点，适合存在性检查；此模式不能使用点探测参数。
+
+### `find_elements(selector, *, mode="smart", x=0, y=0, normalize=True) -> list[dict]`
 
 执行已序列化选择器并返回元素元数据。仅在你需要对接已有 AScript selector JSON 时使用。
 
@@ -354,9 +356,43 @@ button = device.selector().name("login_button")
 selector = device.selector(mode="full", name="settings").visible(True)
 ```
 
-#### `find_all(selector) -> list[UiObject]`
+#### `find_all(selector, *, normalize=True) -> list[UiObject]`
 
-立即查询并返回全部匹配元素。
+立即查询并返回全部匹配元素。`normalize=False` 走快速路径：整个查询只需一次树请求（省去屏幕尺寸与截图两次往返），节点坐标为设备端逻辑点，适合存在性检查；此时不能使用点探测 selector，也不应点击返回的元素。
+
+#### `scroll_until_element(selectors, *, direction="down", swipe_relative=None, x1_ratio=None, y1_ratio=None, x2_ratio=None, y2_ratio=None, timeout=20, interval=0.5, max_swipes=10, duration=None, duration_ms=None, log=False, initial_delay=True)`
+
+沿 `direction` 手势方向滑动，直到语义控件出现。每轮只读取一次完整控件树并在本地匹配全部候选。传入单个 `Selector` 返回 `UiObject`；传入 `{名称: Selector}` 映射返回 `(命中名称, UiObject)`。`direction` 支持 `down`（默认）/`up`/`left`/`right` 及中文，含义与 `scroll_until_image` 相同；`swipe_relative` 元组可完全自定义轨迹并覆盖 `direction`。`duration` 为每次滑动的秒数；超时或滑动次数用尽抛 `LookupError`。
+
+```python
+target = device.scroll_until_element(device.selector().name("checkout_button"), direction="up", timeout=30)
+target.click()
+
+name, element = device.scroll_until_element(
+    {"成功": device.selector().name("order_success"), "售罄": device.selector().text("已售罄")},
+    max_swipes=8,
+)
+```
+
+#### `watch(*rules, interval=2.0, log=False) -> Watcher`
+
+启动后台轮询监控：每 `interval` 秒读取一次完整控件树，规则命中时在设备锁内执行动作。规则可直接传 `Selector`（等价于命中即点击），或传 `WatchRule(selector, action, max_triggers, name)` 自定义动作（`"click"` 或接收 `UiObject` 的可调用对象）与触发次数上限。
+
+```python
+# 权限弹窗自动点击；with 结束自动停止。
+with device.watch(device.selector().text("允许"), interval=1.5):
+    run_login_flow()
+
+# 只记录不动作、限制触发次数。
+with device.watch(
+    WatchRule(device.selector().name("ad_close"), action="click", max_triggers=3, name="关广告"),
+    interval=2,
+) as watcher:
+    ...
+print(watcher.triggered, watcher.errors)
+```
+
+监控线程与主线程动作共用设备锁，不会交叉执行点击；轮询异常记录在 `.errors` 而不是中断后台线程；`.triggered` 记录每次命中的规则名。
 
 #### `find(selector, *, timeout=0) -> UiObject | None`
 

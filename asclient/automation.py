@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, TYPE_CHECKING
+from typing import Any, Callable, Mapping, TYPE_CHECKING
 
+from .client import swipe_gesture
 from .i18n import t
 
 if TYPE_CHECKING:
@@ -257,6 +259,75 @@ class UiSnapshot:
     def roots(self) -> SnapshotCollection: return SnapshotCollection(self, tuple(index for index, parent in enumerate(self._parents) if parent is None))
 
 
+@dataclass(frozen=True)
+class WatchRule:
+    """一条后台监控规则：selector 命中时执行动作。
+
+    ``action`` 为 ``"click"``（点击命中元素）或接收 ``UiObject`` 的可调用
+    对象。``max_triggers`` 限制该规则的触发次数，``0`` 表示不限。
+    """
+
+    selector: Selector
+    action: Callable[[UiObject], Any] | str = "click"
+    max_triggers: int = 0
+    name: str = ""
+
+
+class Watcher:
+    """轮询式规则监控器；命中后自动执行动作，可用上下文管理器取消。"""
+
+    def __init__(self, device: "Device", rules: list[WatchRule], *, interval: float = 2.0, log: bool = False):
+        self.device, self.rules, self.interval, self.log = device, rules, interval, log
+        self.triggered: list[str] = []
+        self.errors: list[str] = []
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def is_running(self) -> bool: return bool(self._thread and self._thread.is_alive())
+    @property
+    def trigger_count(self) -> int: return len(self.triggered)
+
+    def start(self) -> "Watcher":
+        if self.is_running: return self
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None: self._thread.join(timeout=max(2.0, self.interval + 1.0))
+        self._thread = None
+
+    def __enter__(self) -> "Watcher": return self.start()
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        self.stop()
+        return False
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._poll()
+            except Exception as exc:  # 后台线程不向主流程抛异常，记录后继续轮询。
+                self.errors.append(f"{type(exc).__name__}: {exc}")
+            self._stop.wait(self.interval)
+
+    def _poll(self) -> None:
+        snapshot = self.device.snapshot(mode="full")
+        for rule in self.rules:
+            name = rule.name or rule.selector.code()
+            if rule.max_triggers and self.triggered.count(name) >= rule.max_triggers: continue
+            found = snapshot.select(rule.selector).get()
+            if found is None: continue
+            with self.device.client.locked():
+                if callable(rule.action): rule.action(found.object)
+                elif rule.action == "click": found.object.click()
+                else: raise ValueError(f"unsupported watcher action: {rule.action!r}")
+            self.triggered.append(name)
+            if self.log: print(t("watcher_triggered", name=name, count=len(self.triggered)))
+
+
 @dataclass
 class Device:
     """类似 uiautomator2 的高层设备入口。"""
@@ -270,8 +341,14 @@ class Device:
         return selector
     def __call__(self, **attributes: Any) -> "UiCollection": return UiCollection(self, self.selector(**attributes))
     def snapshot(self, *, mode: str = "full") -> UiSnapshot: return UiSnapshot(self, self.client.ui_tree(mode=mode), mode=mode)
-    def find_all(self, selector: Selector) -> list[UiObject]:
-        data = self.client.ui_tree(selector=selector.payload(), mode=selector.mode, x=(selector.point or (0, 0))[0], y=(selector.point or (0, 0))[1])
+    def find_all(self, selector: Selector, *, normalize: bool = True) -> list[UiObject]:
+        """查询 selector 匹配的全部元素。
+
+        ``normalize=False`` 只需一次树请求，节点坐标为设备端逻辑点；
+        适合存在性检查，但此时不能对返回元素执行点击。
+        """
+        if not normalize and selector.point is not None: raise ValueError("point selectors require normalized queries")
+        data = self.client.ui_tree(selector=selector.payload(), mode=selector.mode, x=(selector.point or (0, 0))[0], y=(selector.point or (0, 0))[1], normalize=normalize)
         views = data.get("views") or []
         if not isinstance(views, list): raise ValueError("invalid element list returned by device")
         return [UiObject(self, dict(item), selector) for item in views if isinstance(item, Mapping)]
@@ -292,6 +369,49 @@ class Device:
             if time.monotonic() >= deadline: raise LookupError(f"none of the elements appeared within {timeout}s: {', '.join(selectors)}")
             time.sleep(min(interval, deadline - time.monotonic()))
     def wait_gone(self, selector: Selector, *, timeout: float = 10.0, interval: float = 0.3, log: bool = False) -> bool: return UiCollection(self, selector).wait_gone(timeout=timeout, interval=interval, log=log)
+    def scroll_until_element(self, selectors: Selector | Mapping[str, Selector], *, direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None, timeout: float = 20.0, interval: float = 0.5, max_swipes: int = 10, duration: float | None = None, duration_ms: int | None = None, log: bool = False, initial_delay: bool = True) -> "UiObject | tuple[str, UiObject]":
+        """沿 ``direction`` 滑动，直到语义控件出现。
+
+        每轮只读取一次完整控件树并在本地匹配全部候选 selector；传入单个
+        ``Selector`` 返回 ``UiObject``，传入 ``{名称: Selector}`` 映射返回
+        ``(命中名称, UiObject)``。``timeout``/``interval`` 单位秒，
+        ``duration`` 为每次滑动的秒数；超时或滑动次数用尽抛 ``LookupError``。
+        """
+        if timeout < 0 or interval <= 0 or max_swipes < 0:
+            raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
+        single = isinstance(selectors, Selector)
+        mapping = {"element": selectors} if single else dict(selectors)
+        if not mapping: raise ValueError("selectors must not be empty")
+        x1, y1, x2, y2 = swipe_gesture(direction, swipe_relative, x1_ratio, y1_ratio, x2_ratio, y2_ratio)
+        deadline = time.monotonic() + timeout
+        if initial_delay: time.sleep(min(interval, timeout))
+        for swipe_number in range(max_swipes + 1):
+            snapshot = self.snapshot(mode="full")
+            for name, selector in mapping.items():
+                found = snapshot.select(selector).get()
+                if found is not None:
+                    if log: print(t("element_scroll_match", attempt=swipe_number + 1, name=name))
+                    return found.object if single else (name, found.object)
+            if log: print(t("element_scroll_next", attempt=swipe_number + 1))
+            if swipe_number == max_swipes or time.monotonic() >= deadline: break
+            self.swipe_relative(x1, y1, x2, y2, duration=duration, duration_ms=duration_ms)
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        if log: print(t("element_scroll_stop", attempt=swipe_number + 1))
+        raise LookupError(f"none of the elements appeared after {max_swipes} {direction} swipes or before timeout: {', '.join(mapping)}")
+    def watch(self, *rules: Selector | WatchRule, interval: float = 2.0, log: bool = False) -> Watcher:
+        """启动后台规则监控；直接传 ``Selector`` 等价于命中即点击。
+
+        返回的 ``Watcher`` 支持上下文管理器（退出自动停止），``.triggered``
+        记录触发顺序，``.errors`` 记录轮询异常。监控线程与主线程的动作
+        共用设备锁，不会交叉执行点击。
+        """
+        normalized: list[WatchRule] = []
+        for index, rule in enumerate(rules):
+            if isinstance(rule, Selector): normalized.append(WatchRule(selector=rule, name=f"rule_{index}"))
+            elif isinstance(rule, WatchRule): normalized.append(rule)
+            else: raise ValueError("watch rules must be Selector or WatchRule instances")
+        if not normalized: raise ValueError("watch requires at least one rule")
+        return Watcher(self, normalized, interval=interval, log=log)
     def wait_current_app(self, expected: Any, *, timeout: float = 10.0, interval: float = 0.3) -> Mapping[str, Any]: return self.client.wait_current_app(expected, timeout=timeout, interval=interval)
     def click_if_unique(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, duration: float | None = None, duration_ms: int | None = None) -> UiObject:
         deadline = time.monotonic() + timeout
@@ -352,15 +472,16 @@ class UiCollection:
     device: Device
     selector: Selector
     @property
-    def exists(self) -> bool: return bool(self.all())
+    def exists(self) -> bool: return self.exists_fast()
     @property
-    def count(self) -> int: return len(self.all())
+    def count(self) -> int: return len(self.all(normalize=False))
     @property
     def info(self) -> Mapping[str, Any]:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
         return item.info
-    def all(self) -> list[UiObject]: return self.device.find_all(self.selector)
+    def all(self, *, normalize: bool = True) -> list[UiObject]: return self.device.find_all(self.selector, normalize=normalize)
+    def exists_fast(self) -> bool: return bool(self.all(normalize=False))
     def snapshot(self, *, mode: str = "full") -> SnapshotCollection: return self.device.snapshot(mode=mode).select(self.selector)
     def get(self, *, timeout: float = 0, interval: float = 0.3, log: bool = False) -> UiObject | None:
         if timeout < 0 or interval <= 0: raise ValueError("timeout must be non-negative and interval must be positive")

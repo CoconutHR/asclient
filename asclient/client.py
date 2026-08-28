@@ -83,6 +83,39 @@ class OcrResult:
     raw: Any
 
 
+_SWIPE_DIRECTIONS = {
+    "down": (0.5, 0.2, 0.5, 0.8), "up": (0.5, 0.8, 0.5, 0.2),
+    "left": (0.8, 0.5, 0.2, 0.5), "right": (0.2, 0.5, 0.8, 0.5),
+    "下": (0.5, 0.2, 0.5, 0.8), "上": (0.5, 0.8, 0.5, 0.2),
+    "左": (0.8, 0.5, 0.2, 0.5), "右": (0.2, 0.5, 0.8, 0.5),
+}
+
+
+def swipe_gesture(direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None) -> tuple[float, float, float, float]:
+    """Validate direction/custom-swipe input and return screen ratio endpoints.
+
+    ``direction`` 是手势移动方向，支持 down/up/left/right 及中文；提供
+    ``swipe_relative`` 元组时覆盖方向轨迹，也兼容四个独立比例参数。
+    """
+    custom_swipe = (x1_ratio, y1_ratio, x2_ratio, y2_ratio)
+    if any(value is not None for value in custom_swipe) and not all(value is not None for value in custom_swipe):
+        raise ValueError("x1_ratio, y1_ratio, x2_ratio, and y2_ratio must be supplied together")
+    if swipe_relative is not None:
+        if any(value is not None for value in custom_swipe):
+            raise ValueError("swipe_relative cannot be combined with individual ratio parameters")
+        try:
+            if len(swipe_relative) != 4: raise ValueError
+            custom_swipe = tuple(float(value) for value in swipe_relative)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("swipe_relative must contain four ratios: x1, y1, x2, y2") from exc
+    if all(value is not None for value in custom_swipe):
+        return custom_swipe
+    try:
+        return _SWIPE_DIRECTIONS[direction.lower()]
+    except (AttributeError, KeyError) as exc:
+        raise ValueError("direction must be one of: down, up, left, right, 下, 上, 左, 右") from exc
+
+
 class AScriptClient:
     """AScript 单台设备服务客户端。
 
@@ -90,9 +123,12 @@ class AScriptClient:
     ``timeout`` 单位为秒。所有公开坐标均使用截图物理像素。
     """
 
-    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1):
+    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1, coordinate_cache_ttl: float = 1.0):
         self.address = DeviceAddress.parse(address)
         self.password, self.timeout, self.retries = password, float(timeout), max(0, int(retries))
+        if not math.isfinite(coordinate_cache_ttl) or coordinate_cache_ttl < 0: raise ValueError("coordinate_cache_ttl must be a finite non-negative number of seconds")
+        self.coordinate_cache_ttl = float(coordinate_cache_ttl)
+        self._space_cache: tuple[float, dict[str, float], dict[str, float]] | None = None
 
     @property
     def base_url(self) -> str:
@@ -442,12 +478,25 @@ class AScriptClient:
         raw = self.request("GET", "/api/node/dump", params={"mode": mode, "depth": depth, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}, timeout=30).decode("utf-8")
         return self._scale_xml_coordinates(raw, action["width"] / logical["width"], action["height"] / logical["height"])
 
-    def ui_tree(self, *, mode: str = "smart", selector: Optional[Mapping[str, Any]] = None, x: float = 0, y: float = 0) -> dict[str, Any]:
-        """获取结构化控件树；``x/y`` 为物理像素点探测坐标。"""
-        logical, action = self._coordinate_spaces()
-        params: dict[str, Any] = {"mode": mode, "x": x * logical["width"] / action["width"], "y": y * logical["height"] / action["height"]}
+    def ui_tree(self, *, mode: str = "smart", selector: Optional[Mapping[str, Any]] = None, x: float = 0, y: float = 0, normalize: bool = True) -> dict[str, Any]:
+        """获取结构化控件树；``x/y`` 为物理像素点探测坐标。
+
+        ``normalize=False`` 跳过坐标空间探测和坐标归一化：整个查询只需
+        一次树请求，适合只判断元素存在性或读取非坐标字段的场景；此时
+        返回节点坐标为设备端逻辑点，且不能使用点探测 selector。
+        """
+        params: dict[str, Any] = {"mode": mode}
         if selector is not None:
             params["selector"] = json.dumps(selector, ensure_ascii=False)
+        if not normalize:
+            if x or y: raise ValueError("point probing requires normalized queries")
+            data = self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
+            if not isinstance(data, Mapping):
+                raise DeviceResponseError("invalid UI tree returned by device", body=repr(data))
+            return dict(data)
+        logical, action = self._coordinate_spaces()
+        params["x"] = x * logical["width"] / action["width"]
+        params["y"] = y * logical["height"] / action["height"]
         data = self._ok(self.json("GET", "/api/tool/view/dump", params=params)).get("data", {})
         if not isinstance(data, Mapping):
             raise DeviceResponseError("invalid UI tree returned by device", body=repr(data))
@@ -464,13 +513,14 @@ class AScriptClient:
             x_scale, y_scale = derived_x, derived_y
         return self._scale_tree_coordinates(dict(data), x_scale, y_scale, action)
 
-    def find_elements(self, selector: Mapping[str, Any], *, mode: str = "smart", x: float = 0, y: float = 0) -> list[dict[str, Any]]:
+    def find_elements(self, selector: Mapping[str, Any], *, mode: str = "smart", x: float = 0, y: float = 0, normalize: bool = True) -> list[dict[str, Any]]:
         """Resolve an AScript selector and return its matching element metadata.
 
         ``selector`` follows the documented AScript view-tree contract, for
         example ``{"sel": [{"key": "label", "params": "OK"}], "find": 99999}``.
+        ``normalize=False`` 只发一次树请求，返回的坐标为设备端逻辑点。
         """
-        data = self.ui_tree(mode=mode, selector=selector, x=x, y=y)
+        data = self.ui_tree(mode=mode, selector=selector, x=x, y=y, normalize=normalize)
         views = data.get("views") or []
         if not isinstance(views, list):
             raise DeviceResponseError("invalid element list returned by device", body=repr(views))
@@ -540,12 +590,23 @@ class AScriptClient:
         return {"width": width, "height": height}
 
     def _coordinate_spaces(self) -> tuple[dict[str, float], dict[str, float]]:
+        """Return logical and action sizes, reusing a short-TTL cache.
+
+        轮询类查询每轮都会读取坐标空间；缓存把 3 次设备往返降到 1 次。
+        只缓存截图成功的结果；截屏失败时不缓存，下次重试。旋转屏幕会
+        改变物理尺寸，旋转敏感的流程可设 ``coordinate_cache_ttl=0``。
+        """
+        now = time.monotonic()
+        if self._space_cache is not None and now < self._space_cache[0]:
+            return self._space_cache[1], self._space_cache[2]
         logical = self._logical_screen()
         try:
             action = self.screen_size()
         except DeviceResponseError:
             # A malformed screenshot must not make tree inspection unusable.
-            action = logical
+            return logical, logical
+        if self.coordinate_cache_ttl > 0:
+            self._space_cache = (now + self.coordinate_cache_ttl, logical, action)
         return logical, action
 
     @staticmethod
@@ -626,28 +687,7 @@ class AScriptClient:
         """Swipe in ``direction`` until a template appears, then return its match."""
         if timeout < 0 or interval <= 0 or max_swipes < 0:
             raise ValueError("timeout must be non-negative, interval positive, and max_swipes non-negative")
-        custom_swipe = (x1_ratio, y1_ratio, x2_ratio, y2_ratio)
-        if any(value is not None for value in custom_swipe) and not all(value is not None for value in custom_swipe):
-            raise ValueError("x1_ratio, y1_ratio, x2_ratio, and y2_ratio must be supplied together")
-        if swipe_relative is not None:
-            if any(value is not None for value in custom_swipe):
-                raise ValueError("swipe_relative cannot be combined with individual ratio parameters")
-            try:
-                if len(swipe_relative) != 4: raise ValueError
-                custom_swipe = tuple(float(value) for value in swipe_relative)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("swipe_relative must contain four ratios: x1, y1, x2, y2") from exc
-        directions = {
-            "down": (0.5, 0.2, 0.5, 0.8), "up": (0.5, 0.8, 0.5, 0.2),
-            "left": (0.8, 0.5, 0.2, 0.5), "right": (0.2, 0.5, 0.8, 0.5),
-            "下": (0.5, 0.2, 0.5, 0.8), "上": (0.5, 0.8, 0.5, 0.2),
-            "左": (0.8, 0.5, 0.2, 0.5), "右": (0.2, 0.5, 0.8, 0.5),
-        }
-        if all(value is not None for value in custom_swipe):
-            x1, y1, x2, y2 = custom_swipe
-        else:
-            try: x1, y1, x2, y2 = directions[direction.lower()]
-            except (AttributeError, KeyError) as exc: raise ValueError("direction must be one of: down, up, left, right, 下, 上, 左, 右") from exc
+        x1, y1, x2, y2 = swipe_gesture(direction, swipe_relative, x1_ratio, y1_ratio, x2_ratio, y2_ratio)
         # Validate a custom ratio gesture before the initial wait or any action.
         self.relative_point(x1, y1); self.relative_point(x2, y2)
         deadline = time.monotonic() + timeout

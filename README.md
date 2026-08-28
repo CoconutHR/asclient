@@ -49,6 +49,8 @@ device(text="登录").click()             # 确认无误后再点击
 | 等图片出现后点击中心 | `client.tap_image("assets/继续.png", timeout=10)` |
 | 等 loading 图片消失再继续 | `client.wait_image_gone("assets/loading.png", timeout=20)` |
 | 滚动列表直到目标图片出现 | `client.scroll_until_image("assets/target.png", direction="up")` |
+| 滚动列表直到目标控件出现 | `device.scroll_until_element(device.selector().name("提交"), direction="up")` |
+| 弹窗出现自动点击（后台监控） | `with device.watch(device.selector().text("允许"), interval=1.5): ...` |
 | 按屏幕比例点击（底部中央） | `device.click_rel(0.5, 0.92)` |
 | 按屏幕比例滑动 | `client.swipe_relative(0.5, 0.8, 0.5, 0.2)` |
 | 识别屏幕文字 | `client.ocr()` |
