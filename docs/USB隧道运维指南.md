@@ -70,6 +70,8 @@ copy asclient.example.json asclient.json
 edit asclient.json
 ```
 
+以上是 Windows 写法；macOS/Linux 使用 `cp asclient.example.json asclient.json` 并用任意文本编辑器打开文件。
+
 USB 使用时将 `device.address` 设为本机回环地址：
 
 ```json
@@ -97,6 +99,8 @@ USB 使用时将 `device.address` 设为本机回环地址：
 `udid` 留空时由 `iproxy` 选择其默认设备。多设备环境必须填写 UDID，避免把测试命令转发到错误手机。`asclient.json` 已被 Git 忽略，不得提交密码、UDID 或内网信息。
 
 ## CLI 使用
+
+本节命令沿用 `py -m asclient` 的 Windows 写法；macOS/Linux 替换为 `python3 -m asclient`，`Scripts` 目录已加入 `PATH` 时可直接用 `asc`。三种形式的完整说明见 [API 使用参考](API使用参考.md)的“CLI 参考 → 调用方式”。
 
 在一个专用终端中保持隧道运行：
 

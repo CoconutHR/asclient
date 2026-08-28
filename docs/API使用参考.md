@@ -10,8 +10,8 @@
 | --- | --- |
 | UI 控件查询、点击和输入 | `connect()` / `Device` |
 | 截图、OCR、图色、项目文件、日志 | `AScriptClient` |
-| 交互式检查控件树 | `python -m asclient inspect` |
-| 诊断本机、USB 与设备服务 | `python -m asclient doctor` |
+| 交互式检查控件树 | `py -m asclient inspect` |
+| 诊断本机、USB 与设备服务 | `py -m asclient doctor` |
 | 临时调用已确认但未封装的设备端点 | `AScriptClient.request()` 或 CLI `api` |
 | 设备端执行 Python | `eval_python()` 或 CLI `eval`，仅限受信任代码 |
 
@@ -779,6 +779,20 @@ py -m asclient --yes --device 192.168.3.17:9096 api GET /api/node/dump --params 
 原始接口不是稳定兼容层。使用前应在目标 AScript 版本上验证，并在应用代码中封装、测试和记录端点版本。
 
 ## 12. CLI 参考
+
+### 调用方式
+
+同一个 CLI 有三种等价的调用形式，按环境选择其一即可：
+
+| 形式 | 适用环境 | 说明 |
+| --- | --- | --- |
+| `py -m asclient` | Windows | 推荐；不依赖 `Scripts` 目录是否加入 `PATH` |
+| `python3 -m asclient` | macOS / Linux | 等价命令；部分环境也可用 `python -m asclient` |
+| `asc <命令>` | 已把 Python 用户 `Scripts` 目录加入 `PATH` 的环境 | 最短写法；目录配置方法见[从零开始使用教程](从零开始使用教程.md)的 2.3 节 |
+
+本文所有示例统一写 `py -m asclient`（Windows 风格）；macOS/Linux 用户将其替换为 `python3 -m asclient` 或 `asc` 即可，参数完全相同。
+
+### 命令共用参数
 
 默认从当前目录的 `asclient.json` 读取连接配置。可复制根目录的 `asclient.example.json` 后填写设备信息；命令行参数只用于单次覆盖。所有命令共用：
 

@@ -88,6 +88,8 @@ edit asclient.json
 py -m asclient doctor
 ```
 
+以上为 Windows 写法；macOS/Linux 将 `py` 替换为 `python3`、`copy` 替换为 `cp`，`edit` 表示用任意文本编辑器打开该文件。安装后 `asc` 命令也可用（需将 Python 用户 `Scripts` 目录加入 `PATH`，见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节），例如 `asc doctor`。
+
 常用配置项：
 
 - `language`：`auto`、`zh-CN` 或 `en`。`auto` 时中文系统输出中文，其他系统输出英文。
@@ -203,6 +205,6 @@ py -m unittest discover -s tests -p test_integration.py -v
 
 ## 运行方式与边界
 
-推荐使用 `py -m asclient`，不依赖 Windows Python `Scripts` 目录是否已加入 `PATH`。兼容入口 `py asc.py ...` 仍然可用。
+CLI 有三种等价调用：Windows 推荐 `py -m asclient`（不依赖 `Scripts` 目录是否加入 `PATH`）；macOS/Linux 使用 `python3 -m asclient`；`Scripts` 目录已加入 `PATH` 时可直接用最短的 `asc <命令>`（配置方法见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节）。兼容入口 `py asc.py ...` 仍然可用。
 
 除模板匹配所需的 Pillow 外，该库只依赖 Python 标准库。移动端 API 已针对 iOS 4001 IPA 进行静态分析，并已通过真实 USB 连接验证；生产发布前仍应在目标 App、目标 iOS 版本和目标设备上执行集成验收。
