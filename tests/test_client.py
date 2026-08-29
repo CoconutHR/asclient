@@ -281,6 +281,88 @@ class ClientTests(unittest.TestCase):
         finally:
             self.client.eval_python = original_eval
 
+    def test_element_text_and_scroll_encode_calls_and_validate(self):
+        captured: list[str] = []
+        original_eval = self.client.eval_python
+        self.client.eval_python = lambda code: (captured.append(code), "some text")[1]
+        try:
+            self.assertEqual(self.client.element_text("nid-1"), "some text")
+            self.client.element_scroll("nid-1", "up", 0.5)
+        finally:
+            self.client.eval_python = original_eval
+        joined = "\n".join(captured)
+        self.assertIn("Node(sc, 'nid-1').text", joined)
+        self.assertIn("scroll('up', 0.5)", joined)
+        with self.assertRaises(ValueError): self.client.element_scroll("nid-1", "diagonal")
+        with self.assertRaises(ValueError): self.client.element_scroll("nid-1", "down", 0)
+
+    def test_device_info_and_battery_normalize_values(self):
+        original_eval = self.client.eval_python
+        try:
+            self.client.eval_python = lambda code: {"model": "iPhone"} if "device_info" in code else {"level": "0.35", "state": "Charging: 2>"}
+            self.assertEqual(self.client.device_info(), {"model": "iPhone"})
+            battery = self.client.battery_info()
+            self.assertEqual(battery["level"], 0.35)
+            self.assertEqual(battery["state"], "charging")
+            self.client.eval_python = lambda code: {"level": 0.3, "state": "1"}
+            self.assertEqual(self.client.battery_info()["state"], "unplugged")
+            self.client.eval_python = lambda code: "garbage"
+            with self.assertRaises(DeviceResponseError): self.client.battery_info()
+        finally:
+            self.client.eval_python = original_eval
+
+    def test_open_notification_swipes_from_top_center(self):
+        original_size, original_swipe = self.client.action_size, self.client.swipe
+        self.client.action_size = lambda: {"width": 1000.0, "height": 2000.0}
+        calls: list[tuple[float, ...]] = []
+        self.client.swipe = lambda *coords, **kwargs: calls.append(coords)
+        try:
+            self.client.open_notification()
+        finally:
+            self.client.action_size, self.client.swipe = original_size, original_swipe
+        self.assertEqual(len(calls), 1)
+        x1, y1, x2, y2 = calls[0]
+        self.assertEqual((x1, x2), (500.0, 500.0))
+        self.assertEqual(y1, 3)
+        self.assertGreater(y2, 500)
+
+    def test_uio_get_text_and_scroll_delegate_with_node_id(self):
+        device = Device(self.client)
+        obj = UiObject(device, {"id": "nid-9", "x": 0, "y": 0, "width": 300, "height": 400}, device.selector())
+        captured: list[str] = []
+        original_eval = self.client.eval_python
+        self.client.eval_python = lambda code: (captured.append(code), "label text")[1]
+        try:
+            self.assertEqual(obj.get_text(), "label text")
+            obj.scroll("left", 0.5)
+        finally:
+            self.client.eval_python = original_eval
+        joined = "\n".join(captured)
+        self.assertIn("Node(sc, 'nid-9').text", joined)
+        self.assertIn("scroll('left', 0.5)", joined)
+        no_id = UiObject(device, {"x": 0, "y": 0, "width": 1, "height": 1}, device.selector())
+        with self.assertRaises(ValueError): no_id.get_text()
+
+    def test_uio_scroll_to_finds_target_within_swipes(self):
+        device = Device(self.client)
+        container = UiObject(device, {"id": "nid-9", "x": 0, "y": 0, "width": 300, "height": 400}, device.selector())
+        scrolls: list[tuple[str, float]] = []
+        original_scroll, original_find = self.client.element_scroll, device.find
+        self.client.element_scroll = lambda node_id, direction, distance: scrolls.append((direction, distance))
+        sentinel = object()
+        attempts = {"n": 0}
+        def fake_find(selector, *, timeout=0):
+            attempts["n"] += 1
+            return sentinel if attempts["n"] >= 3 else None
+        device.find = fake_find
+        try:
+            result = container.scroll_to(device.selector().name("target"), interval=0)
+        finally:
+            self.client.element_scroll, device.find = original_scroll, original_find
+        self.assertIs(result, sentinel)
+        self.assertEqual(len(scrolls), 2)
+        self.assertEqual(scrolls[0][0], "down")
+
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")

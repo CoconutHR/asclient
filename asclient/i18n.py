@@ -59,6 +59,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "action_clipboard_set": ("写入设备剪贴板", "write the device clipboard"),
     "action_open_url": ("打开 {url!r}", "open {url!r}"),
     "action_key": ("发送按键 {key!r}", "press key {key!r}"),
+    "action_notification": ("打开通知中心", "open the notification center"),
     "action_deploy": ("部署并运行项目 {project!r}", "deploy and run project {project!r}"),
     "action_tap": ("点击坐标 {coordinates}", "tap at {coordinates}"),
     "action_swipe": ("滑动坐标 {coordinates}", "swipe {coordinates}"),

@@ -71,6 +71,9 @@ _HELP: dict[str, tuple[str, str]] = {
     "orientation": ("orientation\n显示当前屏幕方向（portrait/landscape）。", "orientation\nShow the current screen orientation (portrait/landscape)."),
     "openurl": ("openurl URL\n通过系统打开 URL 或 App 深链。需要 --yes。", "openurl URL\nOpen a URL or app deep link via the system. Requires --yes."),
     "key": ("key {home,volume_up,volume_down,power,power_plus_home,snapshot}\n发送按键事件。需要 --yes。", "key {home,volume_up,volume_down,power,power_plus_home,snapshot}\nSend a key event. Requires --yes."),
+    "device-info": ("device-info\n显示设备信息（型号、名称、locale 等）。", "device-info\nShow device info (model, name, locale, etc.)."),
+    "battery": ("battery\n显示电池电量与状态。", "battery\nShow battery level and state."),
+    "notification": ("notification\n下拉打开通知中心。需要 --yes。", "notification\nOpen the notification center. Requires --yes."),
     "shot": ("shot [输出.png] [--crop-rel 左 上 右 下]\n保存真机截图，可按屏幕比例裁剪。", "shot [OUTPUT.png] [--crop-rel LEFT TOP RIGHT BOTTOM]\nSave a device screenshot with an optional relative crop."),
     "dump": ("dump [输出.xml] [--mode MODE]\n保存 XML 控件树；mode 可为 smart/full/point。", "dump [OUTPUT.xml] [--mode MODE]\nSave the XML control tree; mode can be smart/full/point."),
     "observe": ("observe [--prefix 前缀]\n同时保存截图与 XML 控件树。", "observe [--prefix PREFIX]\nSave a screenshot and the XML control tree together."),
@@ -212,6 +215,9 @@ def _parser() -> argparse.ArgumentParser:
     clip = commands.add_parser("clipboard"); clip.add_argument("text", nargs="?")
     ourl = commands.add_parser("openurl"); ourl.add_argument("url")
     keyp = commands.add_parser("key"); keyp.add_argument("key_name")
+    for name in ("device-info", "battery"):
+        commands.add_parser(name)
+    commands.add_parser("notification")
     ocr = commands.add_parser("ocr"); ocr.add_argument("rect", nargs="?")
     for name in ("findcolor", "compare"):
         item = commands.add_parser(name); item.add_argument("colors"); item.add_argument("--diff", type=float)
@@ -365,6 +371,9 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "orientation": _out(client.orientation())
         elif cmd == "openurl": _confirm(args, client, t("action_open_url", url=args.url)); client.open_url(args.url)
         elif cmd == "key": _confirm(args, client, t("action_key", key=args.key_name)); client.press_key(args.key_name)
+        elif cmd == "device-info": _out(client.device_info())
+        elif cmd == "battery": _out(client.battery_info())
+        elif cmd == "notification": _confirm(args, client, t("action_notification")); client.open_notification()
         elif cmd == "api":
             _confirm(args, client, t("action_api", method=args.method.upper(), path=args.path))
             params, form = json.loads(args.params), json.loads(args.form)

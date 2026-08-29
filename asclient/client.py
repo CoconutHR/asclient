@@ -698,6 +698,52 @@ class AScriptClient:
         except KeyError: raise ValueError(f"key must be one of {sorted(self._KEY_CODES)}") from None
         with self.locked(): self.eval_python("from ascript.ios.system import client\nfrom ascript.ios.wdapy import Keycode\nclient.press(Keycode.%s)\n_result=True" % member)
 
+    def device_info(self) -> dict[str, Any]:
+        """返回设备信息字典；字段缺失时为 ``None``（如 model、name、uuid、locale、界面风格）。"""
+        value = self.eval_python(
+            "import json\n"
+            "from ascript.ios.system import client\n"
+            "di = client.device_info()\n"
+            "_result = json.dumps({'model': di.model, 'name': di.name, 'uuid': di.uuid,"
+            " 'time_zone': di.time_zone, 'current_locale': di.current_locale,"
+            " 'user_interface_idiom': di.user_interface_idiom, 'user_interface_style': di.user_interface_style,"
+            " 'is_simulator': di.is_simulator})\n"
+        )
+        return value if isinstance(value, dict) else {}
+
+    def battery_info(self) -> dict[str, Any]:
+        """返回电池信息：``{"level": 0.0-1.0, "state": "unplugged|charging|full|unknown"}``。"""
+        value = self.eval_python(
+            "import json\n"
+            "from ascript.ios.system import client\n"
+            "bi = client.battery_info()\n"
+            "_result = json.dumps({'level': bi.level, 'state': str(bi.state).split('.')[-1].split(':')[0].strip().lower()})\n"
+        )
+        if not isinstance(value, dict): raise DeviceResponseError("invalid battery info returned by device", body=repr(value))
+        try: value["level"] = float(value.get("level"))
+        except (TypeError, ValueError): value["level"] = None
+        state = str(value.get("state") or "").split(".")[-1].split(":")[0].strip().lower()
+        battery_states = {"0": "unknown", "1": "unplugged", "2": "charging", "3": "full"}
+        value["state"] = battery_states.get(state, state) or None
+        return value
+
+    def element_text(self, node_id: str) -> str:
+        """读取元素文本（等价设备端 WDA ``element/text``）；``node_id`` 取自元素属性的 ``id``。"""
+        value = self.eval_python("from ascript.ios.node import Node\nfrom ascript.ios.system import client as sc\n_result=str(Node(sc, %r).text)" % node_id)
+        return value if isinstance(value, str) else str(value)
+
+    def element_scroll(self, node_id: str, direction: str = "down", distance: float = 1.0) -> None:
+        """在可滚动元素内滚动；``direction``：up/down/left/right，``distance`` 为元素宽高的倍数（0..1+）。"""
+        if direction not in ("up", "down", "left", "right"): raise ValueError("direction must be one of up/down/left/right")
+        if not isinstance(distance, (int, float)) or not 0 < distance <= 5: raise ValueError("distance must be within (0, 5]")
+        with self.locked(): self.eval_python("from ascript.ios.node import Node\nfrom ascript.ios.system import client as sc\nNode(sc, %r).scroll(%r, %r)\n_result=True" % (node_id, direction, float(distance)))
+
+    def open_notification(self) -> None:
+        """下拉打开通知中心；收起可再上滑或按 home。"""
+        size = self.action_size()
+        w, h = float(size["width"]), float(size["height"])
+        self.swipe(w / 2, 3, w / 2, h * 0.5, duration_ms=400)
+
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
             raise ValueError("code is empty")

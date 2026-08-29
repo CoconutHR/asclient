@@ -131,6 +131,26 @@ class UiObject:
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any:
         self.click()
         return self.device.client.input_text(text, interval_ms=interval_ms)
+    def get_text(self) -> str:
+        """读取元素文本（`value`/`label` 的设备端权威值，而非本地树快照）。"""
+        node_id = self.info.get("id")
+        if not node_id: raise ValueError("element has no node id; re-query the element before reading text")
+        return self.device.client.element_text(str(node_id))
+    def scroll(self, direction: str = "down", distance: float = 1.0) -> Any:
+        """在可滚动元素内滚动；``direction``：up/down/left/right，``distance`` 为元素宽高倍数。"""
+        node_id = self.info.get("id")
+        if not node_id: raise ValueError("element has no node id; re-query the element before scrolling")
+        return self.device.client.element_scroll(str(node_id), direction, distance)
+    def scroll_to(self, selector: "Selector | dict[str, Any]", *, direction: str = "down", max_swipes: int = 8, distance: float = 0.8, interval: float = 0.3) -> "UiObject | None":
+        """在当前可滚动元素内滚动查找目标；找到返回元素，``max_swipes`` 次后未找到返回 ``None``。"""
+        target_selector = selector if isinstance(selector, Selector) else self.device.selector(**selector)
+        for attempt in range(max_swipes + 1):
+            found = self.device.find(target_selector, timeout=0)
+            if found is not None: return found
+            if attempt >= max_swipes: return None
+            self.scroll(direction, distance)
+            time.sleep(max(0, interval))
+        return None
     def screenshot(self, destination: str | Path | None = None) -> bytes | Path:
         frame = self.device.client.capture_frame()
         rect = self.rect
@@ -166,6 +186,9 @@ class SnapshotNode:
     def drag_to(self, x: float, y: float, **kwargs: Any) -> Any: return self.object.drag_to(x, y, **kwargs)
     def drag_to_relative(self, x_ratio: float, y_ratio: float, **kwargs: Any) -> Any: return self.object.drag_to_relative(x_ratio, y_ratio, **kwargs)
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any: return self.object.set_text(text, interval_ms=interval_ms)
+    def get_text(self) -> str: return self.object.get_text()
+    def scroll(self, direction: str = "down", distance: float = 1.0) -> Any: return self.object.scroll(direction, distance)
+    def scroll_to(self, selector: "Selector | dict[str, Any]", **kwargs: Any) -> Any: return self.object.scroll_to(selector, **kwargs)
 
 
 class SnapshotCollection:
@@ -424,6 +447,9 @@ class Device:
     def open_url(self, url: str) -> Any: return self.client.open_url(url)
     def dismiss_keyboard(self) -> Any: return self.client.dismiss_keyboard()
     def press_key(self, key: str) -> Any: return self.client.press_key(key)
+    def device_info(self) -> Any: return self.client.device_info()
+    def battery_info(self) -> Any: return self.client.battery_info()
+    def open_notification(self) -> Any: return self.client.open_notification()
     def click_if_unique(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, duration: float | None = None, duration_ms: int | None = None) -> UiObject:
         deadline = time.monotonic() + timeout
         with self.client.locked():
@@ -528,3 +554,15 @@ class UiCollection:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
         return item.set_text(text, interval_ms=interval_ms)
+    def get_text(self) -> str:
+        item = self.get()
+        if item is None: raise LookupError(f"element not found: {self.selector.code()}")
+        return item.get_text()
+    def scroll(self, direction: str = "down", distance: float = 1.0) -> Any:
+        item = self.get()
+        if item is None: raise LookupError(f"element not found: {self.selector.code()}")
+        return item.scroll(direction, distance)
+    def scroll_to(self, selector: "Selector | dict[str, Any]", **kwargs: Any) -> Any:
+        item = self.get()
+        if item is None: raise LookupError(f"element not found: {self.selector.code()}")
+        return item.scroll_to(selector, **kwargs)
