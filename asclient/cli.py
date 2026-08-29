@@ -69,6 +69,7 @@ _HELP: dict[str, tuple[str, str]] = {
     "tunnel": ("tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]\n通过 USB 同时转发控制端口 9096 和日志端口 10102。", "tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]\nForward USB control port 9096 and log port 10102."),
     "eval": ("eval CODE\n执行受信任的设备端 Python。需要 --yes。", "eval CODE\nRun trusted device-side Python. Requires --yes."),
     "cat": ("cat 远程路径 [输出文件]\n打印或保存设备端文件。", "cat REMOTE_PATH [OUTPUT]\nPrint or save a device-side file."),
+    "mv": ("mv 远程路径 新名字\n在同目录内重命名设备端文件或目录。需要 --yes。", "mv REMOTE_PATH NEW_NAME\nRename a device-side file or directory within its parent. Requires --yes."),
     "ocr": ("ocr [rect]\n识别屏幕文字（设备端 OCR）。", "ocr [rect]\nRecognize on-screen text with device OCR."),
     "findcolor": ("findcolor COLORS [--diff FLOAT]\n查找颜色组合。", "findcolor COLORS [--diff FLOAT]\nFind a color combination on screen."),
     "compare": ("compare COLORS [--diff FLOAT]\n比对指定颜色组合。", "compare COLORS [--diff FLOAT]\nCompare the given color combination."),
@@ -194,6 +195,7 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--udid"); tunnel.add_argument("--iproxy")
     ev = commands.add_parser("eval"); ev.add_argument("code")
     cat = commands.add_parser("cat"); cat.add_argument("path"); cat.add_argument("output", nargs="?")
+    mv = commands.add_parser("mv"); mv.add_argument("path"); mv.add_argument("new_name")
     ocr = commands.add_parser("ocr"); ocr.add_argument("rect", nargs="?")
     for name in ("findcolor", "compare"):
         item = commands.add_parser(name); item.add_argument("colors"); item.add_argument("--diff", type=float)
@@ -283,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
             data = client.read_file(args.path)
             if args.output: Path(args.output).write_bytes(data); print(Path(args.output).resolve())
             else: sys.stdout.buffer.write(data)
+        elif cmd == "mv":
+            _confirm(args, client, t("action_mv", path=args.path, new_name=args.new_name))
+            client.rename_remote(args.path, args.new_name)
         elif cmd == "ocr":
             result = client.ocr(region=tuple(int(value) for value in args.rect.split("|")) if args.rect else None)
             _out({"items": [{"text": item.text, "rect": item.rect, "confidence": item.confidence} for item in result.items], "raw": result.raw})

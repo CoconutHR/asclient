@@ -51,6 +51,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "action_remove": ("删除项目 {project!r}", "remove project {project!r}"),
     "action_rename": ("将项目 {project!r} 重命名为 {new_name!r}", "rename project {project!r} to {new_name!r}"),
     "action_upload": ("上传文件到项目 {project!r}", "upload into project {project!r}"),
+    "action_mv": ("将设备端文件 {path!r} 重命名为 {new_name!r}", "rename device-side file {path!r} to {new_name!r}"),
     "action_deploy": ("部署并运行项目 {project!r}", "deploy and run project {project!r}"),
     "action_tap": ("点击坐标 {coordinates}", "tap at {coordinates}"),
     "action_swipe": ("滑动坐标 {coordinates}", "swipe {coordinates}"),

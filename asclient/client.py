@@ -915,6 +915,15 @@ class AScriptClient:
     def remove_remote(self, path: str) -> None:
         with self.locked(): self._ok(self.json("GET", "/api/file/remove", params={"path": path}))
 
+    def rename_remote(self, path: str, new_name: str) -> None:
+        """重命名设备端文件或目录（同目录内）。
+
+        ``path`` 为完整远程路径（支持 ``~/`` 前缀）；``new_name`` 只是新名字，
+        不能包含路径分隔符，设备端会在原目录下完成改名。
+        """
+        if not new_name or "/" in new_name or "\\" in new_name: raise ValueError("new_name must be a bare file name without path separators")
+        with self.locked(): self._ok(self.json("GET", "/api/file/rename", params={"path": path, "name": new_name}))
+
     def upload_file(self, project: str, local_path: str | Path, remote_path: Optional[str] = None) -> None:
         project, local_path = self._name(project), Path(local_path)
         if not local_path.is_file():

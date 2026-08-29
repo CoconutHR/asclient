@@ -732,10 +732,12 @@ client.stop_project()
 | `save_text(remote_path, content)` | 保存 UTF-8 文本到设备端路径 |
 | `create_remote(parent, name, directory=False)` | 创建设备端文件或目录；`directory=True` 创建目录 |
 | `remove_remote(path)` | 删除设备端路径，具有破坏性 |
+| `rename_remote(path, new_name)` | 在原目录内重命名设备端文件或目录；`new_name` 只是新名字，不能包含路径分隔符 |
 
 ```python
 client.save_text("~/modules/demo/config.json", '{"debug": false}')
 raw = client.read_file("~/modules/demo/config.json")
+client.rename_remote("~/modules/demo/config.json", "settings.json")
 ```
 
 ### 上传、下载与部署

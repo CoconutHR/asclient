@@ -208,6 +208,14 @@ class ClientTests(unittest.TestCase):
         self.assertIn(b"print(1)", upload[3])
         with self.assertRaises(ValueError): self.client.upload_file("../bad", source)
 
+    def test_rename_remote_sends_bare_name_and_rejects_paths(self):
+        self.client.rename_remote("~/modules/demo/main.py", "entry.py")
+        call = next(call for call in Handler.calls if call[1] == "/api/file/rename")
+        self.assertEqual(call[2]["path"], ["~/modules/demo/main.py"])
+        self.assertEqual(call[2]["name"], ["entry.py"])
+        with self.assertRaises(ValueError): self.client.rename_remote("~/modules/demo/main.py", "src/entry.py")
+        with self.assertRaises(ValueError): self.client.rename_remote("~/modules/demo/main.py", "")
+
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
