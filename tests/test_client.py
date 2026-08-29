@@ -267,6 +267,48 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(status["screen"]["width"], 300)
         self.assertEqual(status["logical_screen"]["width"], 100)
 
+    def test_status_backfills_readonly_fields_via_eval_when_degraded(self):
+        original_json, original_screenshot, original_eval = self.client.json, self.client.screenshot, self.client.eval_python
+        def fake_json(method, path, **kwargs):
+            if path == "/api/status": return {"code": -1, "msg": "'ObjCStrInstance' object is not callable"}
+            if path == "/api/screen/size": return {"code": 1, "data": {"width": 100, "height": 200}}
+            if path == "/api/node/package": return {"code": 1, "data": {"bundle_id": "example"}}
+            return original_json(method, path, **kwargs)
+        def fake_eval(code):
+            self.assertIn("languageCode", code)
+            return {"device": {"model": "iPhone15,2"}, "system": {"language": "zh"}}
+        try:
+            self.client.json = fake_json
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (300).to_bytes(4, "big") + (600).to_bytes(4, "big")
+            self.client.eval_python = fake_eval
+            status = self.client.status()
+        finally:
+            self.client.json, self.client.screenshot, self.client.eval_python = original_json, original_screenshot, original_eval
+        self.assertEqual(status["device"]["model"], "iPhone15,2")
+        self.assertEqual(status["system"]["language"], "zh")
+        self.assertEqual(status["compatibility"]["status_api"]["compensated_fields"], ["device", "system"])
+        self.assertIn("eval", status["compatibility"]["status_api"]["message"])
+
+    def test_status_stays_degraded_without_backfill_when_eval_fails(self):
+        original_json, original_screenshot, original_eval = self.client.json, self.client.screenshot, self.client.eval_python
+        def fake_json(method, path, **kwargs):
+            if path == "/api/status": return {"code": -1, "msg": "'ObjCStrInstance' object is not callable"}
+            if path == "/api/screen/size": return {"code": 1, "data": {"width": 100, "height": 200}}
+            if path == "/api/node/package": return {"code": 1, "data": {"bundle_id": "example"}}
+            return original_json(method, path, **kwargs)
+        def broken_eval(code):
+            raise DeviceOperationError("eval endpoint unavailable")
+        try:
+            self.client.json = fake_json
+            self.client.screenshot = lambda: b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (300).to_bytes(4, "big") + (600).to_bytes(4, "big")
+            self.client.eval_python = broken_eval
+            status = self.client.status()
+        finally:
+            self.client.json, self.client.screenshot, self.client.eval_python = original_json, original_screenshot, original_eval
+        self.assertEqual(status["health"], "degraded")
+        self.assertNotIn("device", status)
+        self.assertNotIn("compensated_fields", status["compatibility"]["status_api"])
+
     def test_packages_uses_eval_when_status_has_no_package_list(self):
         original_status, original_eval = self.client.status, self.client.eval_python
         self.client.status = lambda: {"available": True}

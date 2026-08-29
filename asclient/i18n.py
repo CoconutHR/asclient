@@ -98,6 +98,7 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "invalid_json": ("接口 {path} 返回了无效 JSON", "invalid JSON response from {path}"),
     "expected_object": ("接口 {path} 应返回 JSON 对象", "expected object response from {path}"),
     "status_fallback_summary": ("/api/status 存在设备端兼容性问题，客户端已降级探测可用能力", "the device /api/status endpoint has a compatibility issue; the client used capability fallback"),
+    "status_compensated_fields": ("已通过设备端 eval 回填只读字段：{fields}", "read-only fields were backfilled via on-device eval: {fields}"),
     "cannot_reach_logs": ("无法连接 AScript 日志服务 {host}:10102: {detail}", "cannot reach AScript log service at {host}:10102: {detail}"),
     "websocket_rejected": ("AScript 日志服务拒绝 WebSocket 连接", "AScript log endpoint rejected WebSocket upgrade"),
     "doctor_title": ("ASClient 环境诊断", "ASClient environment diagnosis"),

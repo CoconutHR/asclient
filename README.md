@@ -20,7 +20,7 @@ edit asclient.json
 py -m asclient status
 ```
 
-输出中 `"available": true` 即连接成功（部分设备显示 `health: "degraded"` 属于已知兼容降级，不代表失败）。接着用五行 Python 完成第一次自动化：
+输出中 `"available": true` 即连接成功（部分设备显示 `health: "degraded"` 属于已知兼容降级，不代表失败；客户端会自动用设备端 eval 回补缺失的只读字段，见生产使用指南的兼容降级根因章节）。接着用五行 Python 完成第一次自动化：
 
 ```python
 from asclient import connect
