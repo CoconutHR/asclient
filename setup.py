@@ -1,13 +1,8 @@
-"""Compatibility build entry point for older pip/setuptools installations."""
+"""Compatibility shim: all metadata lives in pyproject.toml.
+
+Kept so that legacy ``python setup.py``-style workflows and very old pip
+versions keep working; setuptools reads pyproject.toml for the real values.
+"""
 from setuptools import setup
 
-
-setup(
-    name="asclient",
-    version="0.8.0",
-    description="AScript local iOS device client",
-    python_requires=">=3.10",
-    install_requires=["Pillow>=9.0"],
-    packages=["asclient"],
-    entry_points={"console_scripts": ["asc=asclient.cli:main"]},
-)
+setup()

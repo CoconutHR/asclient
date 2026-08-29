@@ -6,8 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "asclient"
 version = "0.8.0"
 description = "AScript local iOS device client"
+readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name = "CoconutHR" }]
+keywords = ["ascript", "ios", "automation", "ui-automation", "device-testing", "uiautomator2"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
 dependencies = ["Pillow>=9.0"]
+
+[project.urls]
+Homepage = "https://github.com/CoconutHR/asclient"
+Repository = "https://github.com/CoconutHR/asclient"
+Issues = "https://github.com/CoconutHR/asclient/issues"
 
 [project.scripts]
 asc = "asclient.cli:main"

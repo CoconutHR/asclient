@@ -1,11 +1,18 @@
 """Dependency-free client for AScript's local iOS device service."""
 
+from importlib.metadata import PackageNotFoundError, version as _package_version
+
 from .client import AScriptClient, DeviceAddress, ImageMatch, LogEntry, OcrItem, OcrResult
 from .automation import Device, Selector, UiCollection, UiObject, UiSnapshot, SnapshotNode, SnapshotCollection, WatchRule, Watcher
 from .vision import PixelColor, ScreenFrame
 from .run import Run
 from .tunnel import AScriptTunnel, IProxyTunnel
 from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, IProxyNotFoundError, TunnelError
+
+try:
+    __version__ = _package_version("asclient")
+except PackageNotFoundError:  # running from a source checkout without installation
+    __version__ = "0.0.0+unknown"
 
 
 def connect(address: str, *, password: str = "", timeout: float = 15.0, retries: int = 1) -> Device:
