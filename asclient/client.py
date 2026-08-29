@@ -623,9 +623,10 @@ class AScriptClient:
     def app_state(self, bundle_id: str) -> dict[str, Any]:
         """返回 App 运行状态：``{"code": 0-4, "state": "not_running|background|foreground"}``。
 
-        设备端 WDA 的状态码对第三方 App 不可靠（真机实测前台 App 可能返回
-        1）；因此同一帧内同时读取 ``app_current``，bundle 一致时强制判定为
-        foreground。
+        设备端 WDA 状态码为静态值（真机实测前台/后台/被杀均返回相同码，
+        且不随状态变化），因此 ``"background"`` 与 ``"not_running"`` 在该
+        实现上不可区分；客户端在同一帧内同时读取 ``app_current``，bundle
+        一致时强制判定为 foreground，其余情况报 not_running。
         """
         if not bundle_id or not isinstance(bundle_id, str): raise ValueError("bundle_id must be a non-empty string")
         code = (
@@ -649,8 +650,9 @@ class AScriptClient:
     def lock_screen(self) -> None:
         """锁定屏幕。
 
-        设备端不提供可靠的锁屏状态查询（WDA ``/wda/locked`` 读数在部分
-        设备上不正确，已真机确认）；需要判断时可对截图做全黑检测。
+        设备端不提供可靠的锁屏状态查询：WDA ``/wda/locked`` 在实测设备上
+        恒为 False（锁屏前后均如此，已真机确认）。需要判断时可对截图做
+        全黑检测。
         """
         with self.locked(): self.eval_python("from ascript.ios import system\nsystem.lock()\n_result=True")
 

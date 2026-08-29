@@ -172,8 +172,8 @@ assert app["bundle_id"] == "com.example.app"
 | --- | --- |
 | `app_start(bundle_id, *, timeout=15, wait=True)` | 启动 App；`wait=True` 时等待其进入前台，超时抛 `DeviceOperationError` |
 | `app_stop(bundle_id)` | 停止 App（等价于上划杀掉） |
-| `app_state(bundle_id) -> dict` | `{"code": 0-4, "state": "foreground\|background\|not_running"}`；设备端 WDA 状态码对第三方 App 不可靠，客户端会同时读取前台 App 修正判定 |
-| `lock_screen()` / `unlock_screen()` | 锁定 / 解锁屏幕；已设密码的设备无法程序化解锁。设备端不提供可靠的锁屏状态查询（WDA `/wda/locked` 读数在部分设备不正确），需要判断时可对截图做全黑检测 |
+| `app_state(bundle_id) -> dict` | `{"code": 0-4, "state": "foreground\|background\|not_running"}`；设备端 WDA 状态码为静态值（真机实测不随前后台变化），客户端以同帧前台 App 修正判定，`background` 与 `not_running` 在该设备上不可区分 |
+| `lock_screen()` / `unlock_screen()` | 锁定 / 解锁屏幕；已设密码的设备无法程序化解锁。设备端不提供可靠的锁屏状态查询（WDA `/wda/locked` 在实测设备上恒为 False），需要判断时可对截图做全黑检测 |
 | `get_clipboard() -> str` / `set_clipboard(content)` | 读取 / 写入设备剪贴板文本 |
 | `orientation() -> str` | 当前屏幕方向：`"portrait"` 或 `"landscape"`；跟随物理旋转实时变化，设备端无程序化设置接口 |
 | `open_url(url)` | 打开 URL 或 App 深链（如 `myapp://page`） |
