@@ -60,8 +60,6 @@ _MESSAGES: dict[str, tuple[str, str]] = {
     "action_open_url": ("打开 {url!r}", "open {url!r}"),
     "action_key": ("发送按键 {key!r}", "press key {key!r}"),
     "action_notification": ("打开通知中心", "open the notification center"),
-    "clear_text_failed": ("伪清空未能在 %d 轮内完成，元素可能不可编辑", "pseudo-clear did not finish within %d cycles; the element may not be editable"),
-    "clear_text_cycle": ("伪清空第 {cycle} 轮：长度 {length}，剪切 {cut}", "pseudo-clear cycle {cycle}: length {length}, cut {cut}"),
     "action_deploy": ("部署并运行项目 {project!r}", "deploy and run project {project!r}"),
     "action_tap": ("点击坐标 {coordinates}", "tap at {coordinates}"),
     "action_swipe": ("滑动坐标 {coordinates}", "swipe {coordinates}"),

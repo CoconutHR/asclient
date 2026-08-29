@@ -73,7 +73,6 @@ device(text="登录").click()             # 确认无误后再点击
 | 打开 URL / 深链 | `client.open_url("myapp://page")` |
 | 发送按键（home/音量/电源） | `client.press_key("home")` |
 | 读取元素文本 | `device(label="标题").get_text()` |
-| 清空元素文本（伪清空） | `device(name="搜索框").clear_text()` |
 | 元素内滚动 / 滚动查找 | `element.scroll("down", 0.8)` / `element.scroll_to(device.selector().name("目标"))` |
 | 查电池 / 设备信息 | `client.battery_info()` / `client.device_info()` |
 | 查到唯一元素才点击（锁内原子） | `device.click_if_unique(device.selector().name("提交"))` |

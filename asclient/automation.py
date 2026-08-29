@@ -136,24 +136,6 @@ class UiObject:
         node_id = self.info.get("id")
         if not node_id: raise ValueError("element has no node id; re-query the element before reading text")
         return self.device.client.element_text(str(node_id))
-    def clear_text(self, *, max_cycles: int = 40, log: bool = False) -> bool:
-        """伪清空元素文本：聚焦后循环「双击选中 → 编辑菜单剪切」。
-
-        设备端原生 clear 在该实现上无效（详见 API 参考），故采用菜单模拟；
-        逐词剪切因此较慢（每轮约 1.5 秒）。元素句柄会随 UI 变化自动刷新。
-        返回是否清空。
-        """
-        node_id = self.info.get("id")
-        if not node_id: raise ValueError("element has no node id; re-query the element before clearing text")
-        rect = self.rect
-        if rect["width"] <= 0 or rect["height"] <= 0: raise ValueError("element has an empty rectangle")
-
-        def refind() -> tuple[str, float, float] | None:
-            fresh = self.device.find(self.selector, timeout=0)
-            if fresh is None: return None
-            return str(fresh.info.get("id") or node_id), *fresh.center
-
-        return self.device.client.element_clear_text(str(node_id), *self.center, max_cycles=max_cycles, log=log, refind=refind)
     def scroll(self, direction: str = "down", distance: float = 1.0) -> Any:
         """在可滚动元素内滚动；``direction``：up/down/left/right，``distance`` 为元素宽高倍数。"""
         node_id = self.info.get("id")
@@ -205,7 +187,6 @@ class SnapshotNode:
     def drag_to_relative(self, x_ratio: float, y_ratio: float, **kwargs: Any) -> Any: return self.object.drag_to_relative(x_ratio, y_ratio, **kwargs)
     def set_text(self, text: str, *, interval_ms: int = 120) -> Any: return self.object.set_text(text, interval_ms=interval_ms)
     def get_text(self) -> str: return self.object.get_text()
-    def clear_text(self, *, max_cycles: int = 40, log: bool = False) -> Any: return self.object.clear_text(max_cycles=max_cycles, log=log)
     def scroll(self, direction: str = "down", distance: float = 1.0) -> Any: return self.object.scroll(direction, distance)
     def scroll_to(self, selector: "Selector | dict[str, Any]", **kwargs: Any) -> Any: return self.object.scroll_to(selector, **kwargs)
 
@@ -577,10 +558,6 @@ class UiCollection:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
         return item.get_text()
-    def clear_text(self, *, max_cycles: int = 40, log: bool = False) -> Any:
-        item = self.get()
-        if item is None: raise LookupError(f"element not found: {self.selector.code()}")
-        return item.clear_text(max_cycles=max_cycles, log=log)
     def scroll(self, direction: str = "down", distance: float = 1.0) -> Any:
         item = self.get()
         if item is None: raise LookupError(f"element not found: {self.selector.code()}")
