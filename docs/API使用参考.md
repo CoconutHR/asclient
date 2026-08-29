@@ -562,7 +562,8 @@ submit.click()
 | `.click()` | 以矩形中心的物理像素点击；空矩形抛 `ValueError` |
 | `.click_relative(x_ratio, y_ratio)` | 按元素矩形比例点击；`(0, 0)` 为左上、`(1, 1)` 为矩形内最后一个有效像素 |
 | `.set_text(text, interval_ms=120)` | 先点选再输入 |
-| `.get_text() -> str` | 从设备端读取元素权威文本（需元素携带 `id`；真机已验证）。注意：`clear_text` 在当前设备 WDA 上不可用（原生 `/clear`、键盘删除、退格符均无效，已真机确认），如需清空请结合业务用 `.set_text` 覆盖或重新加载页面 |
+| `.get_text() -> str` | 从设备端读取元素权威文本（需元素携带 `id`；真机已验证） |
+| `.clear_text(*, max_cycles=40, log=False) -> bool` | **伪清空**：设备端原生 `/clear`、`/value`、HID 删除键与退格符均无效（noWDA 实现限制，已真机确认），因此通过 iOS 编辑菜单循环「双击选中 → 剪切」逐词删除，元素句柄随 UI 变化自动刷新。速度较慢（每轮约 2-8 秒），连续 3 轮值不缩短、菜单连续 6 次不出现或读取持续失败时提前返回 `False`。`UiCollection`/`SnapshotNode` 提供同名委托 |
 | `.scroll(direction="down", distance=1.0)` | 在可滚动元素内滚动；`direction`：up/down/left/right，`distance` 为元素宽高倍数（真机已验证） |
 | `.scroll_to(selector, *, direction="down", max_swipes=8, distance=0.8, interval=0.3)` | 在该元素内边滚边找目标；找到返回 `UiObject`，超过 `max_swipes` 返回 `None`。`UiCollection` 提供同名委托 |
 

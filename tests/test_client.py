@@ -363,6 +363,60 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(scrolls), 2)
         self.assertEqual(scrolls[0][0], "down")
 
+    def test_element_clear_text_cuts_until_empty(self):
+        reads = iter(["junk", "junk", "ord", ""])
+        taps: list[float] = []
+        original_eval, original_double, original_tap, original_find = self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements
+        self.client.eval_python = lambda code: next(reads)
+        self.client.double_tap = lambda x, y, **kw: taps.append(x)
+        self.client.tap = lambda x, y, **kw: None
+        self.client.find_elements = lambda selector, **kw: [{"label": "剪切", "x": 100, "y": 200, "width": 50, "height": 30}]
+        try:
+            self.assertTrue(self.client.element_clear_text("nid-1", 100.0, 200.0))
+        finally:
+            self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements = original_eval, original_double, original_tap, original_find
+        self.assertEqual(len(taps), 4)
+
+    def test_element_clear_text_fails_when_value_stops_shrinking(self):
+        reads = iter(["abc"] * 10)
+        original_eval, original_double, original_tap, original_find = self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements
+        self.client.eval_python = lambda code: next(reads)
+        self.client.double_tap = lambda x, y, **kw: None
+        self.client.tap = lambda x, y, **kw: None
+        self.client.find_elements = lambda selector, **kw: [{"label": "剪切", "x": 100, "y": 200, "width": 50, "height": 30}]
+        try:
+            self.assertFalse(self.client.element_clear_text("nid-1", 100.0, 200.0))
+        finally:
+            self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements = original_eval, original_double, original_tap, original_find
+
+    def test_element_clear_text_fails_after_consecutive_read_errors(self):
+        original_eval, original_double, original_tap = self.client.eval_python, self.client.double_tap, self.client.tap
+        self.client.eval_python = lambda code: (_ for _ in ()).throw(DeviceOperationError("eval glitch"))
+        self.client.double_tap = lambda x, y, **kw: None
+        self.client.tap = lambda x, y, **kw: None
+        try:
+            self.assertFalse(self.client.element_clear_text("nid-1", 100.0, 200.0))
+        finally:
+            self.client.eval_python, self.client.double_tap, self.client.tap = original_eval, original_double, original_tap
+
+    def test_element_clear_text_recovers_handle_via_refind(self):
+        state = {"calls": 0}
+        def fake_eval(code):
+            state["calls"] += 1
+            if state["calls"] == 1: raise DeviceOperationError("stale handle")
+            return ("ab", "", "")[state["calls"] - 2]
+        original_eval, original_double, original_tap, original_find = self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements
+        self.client.eval_python = fake_eval
+        double_taps: list[tuple[float, float]] = []
+        self.client.double_tap = lambda x, y, **kw: double_taps.append((x, y))
+        self.client.tap = lambda x, y, **kw: None
+        self.client.find_elements = lambda selector, **kw: [{"label": "剪切", "x": 100, "y": 200, "width": 50, "height": 30}]
+        try:
+            self.assertTrue(self.client.element_clear_text("stale", 10.0, 20.0, refind=lambda: ("fresh", 55.0, 66.0)))
+        finally:
+            self.client.eval_python, self.client.double_tap, self.client.tap, self.client.find_elements = original_eval, original_double, original_tap, original_find
+        self.assertEqual(double_taps, [(10.0, 20.0), (55.0, 66.0)])
+
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
