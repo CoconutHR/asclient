@@ -10,3 +10,4 @@ dist/
 asclient.json
 tests/integration.json
 artifacts/
+.zcode/
