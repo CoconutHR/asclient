@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, Run, UiObject, connect
+from asclient import AScriptClient, AScriptTunnel, Device, DeviceOperationError, DeviceResponseError, Run, UiObject, connect
 from asclient.cli import _stop_tunnel_on_sigterm, main
 from asclient.config import device_options, load_config, tunnel_options
 from asclient.doctor import DoctorCheck, _port_available, diagnose, save_report, set_iproxy_path
@@ -215,6 +215,71 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(call[2]["name"], ["entry.py"])
         with self.assertRaises(ValueError): self.client.rename_remote("~/modules/demo/main.py", "src/entry.py")
         with self.assertRaises(ValueError): self.client.rename_remote("~/modules/demo/main.py", "")
+
+    def test_device_helpers_encode_eval_calls_and_validate_keys(self):
+        captured: list[str] = []
+        original_eval = self.client.eval_python
+        self.client.eval_python = lambda code: (captured.append(code), True)[1]
+        try:
+            self.client.app_stop("com.example.app")
+            self.client.lock_screen()
+            self.client.unlock_screen()
+            self.client.set_clipboard("hello 中文")
+            self.client.open_url("asclient://demo")
+            self.client.press_key("volume_up")
+            self.client.dismiss_keyboard()
+        finally:
+            self.client.eval_python = original_eval
+        joined = "\n".join(captured)
+        self.assertIn("app_stop('com.example.app')", joined)
+        self.assertIn("system.lock()", joined)
+        self.assertIn("system.unlock()", joined)
+        self.assertIn("set_clipboard('hello 中文')", joined)
+        self.assertIn("open_url('asclient://demo')", joined)
+        self.assertIn("Keycode.VOLUME_UP", joined)
+        self.assertIn("keyboard_dismiss()", joined)
+        with self.assertRaises(ValueError): self.client.press_key("back")
+        with self.assertRaises(ValueError): self.client.app_start("")
+
+    def test_app_start_waits_for_foreground_or_times_out(self):
+        original_eval, original_current = self.client.eval_python, self.client.current_app
+        self.client.eval_python = lambda code: True
+        try:
+            self.client.current_app = lambda: {"bundle_id": "com.example.app"}
+            result = self.client.app_start("com.example.app")
+            self.assertEqual(result["bundle_id"], "com.example.app")
+            self.client.current_app = lambda: {"bundle_id": "com.other.app"}
+            with self.assertRaises(DeviceOperationError): self.client.app_start("com.example.app", timeout=0)
+        finally:
+            self.client.eval_python, self.client.current_app = original_eval, original_current
+
+    def test_app_state_trusts_current_app_over_wda_code(self):
+        cases = [
+            ({"code": 1, "current": "com.example.app"}, "foreground"),
+            ({"code": 1, "current": ""}, "not_running"),
+            ({"code": 2, "current": "com.other.app"}, "background"),
+        ]
+        original_eval = self.client.eval_python
+        try:
+            for payload, expected in cases:
+                self.client.eval_python = lambda code, payload=payload: payload
+                self.assertEqual(self.client.app_state("com.example.app")["state"], expected)
+            self.client.eval_python = lambda code: "garbage"
+            with self.assertRaises(DeviceResponseError): self.client.app_state("com.example.app")
+        finally:
+            self.client.eval_python = original_eval
+
+    def test_clipboard_and_orientation_validate_device_values(self):
+        original_eval = self.client.eval_python
+        try:
+            self.client.eval_python = lambda code: "landscape"
+            self.assertEqual(self.client.orientation(), "landscape")
+            self.client.eval_python = lambda code: "sideways"
+            with self.assertRaises(DeviceResponseError): self.client.orientation()
+            self.client.eval_python = lambda code: "copied text"
+            self.assertEqual(self.client.get_clipboard(), "copied text")
+        finally:
+            self.client.eval_python = original_eval
 
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")

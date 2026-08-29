@@ -597,6 +597,105 @@ class AScriptClient:
             if time.monotonic() >= deadline: raise LookupError(f"foreground app did not match within {timeout}s")
             time.sleep(min(interval, deadline - time.monotonic()))
 
+    _APP_STATE_NAMES = {0: "not_running", 1: "not_running", 2: "background", 3: "foreground", 4: "foreground"}
+
+    def app_start(self, bundle_id: str, *, timeout: float = 15.0, wait: bool = True) -> dict[str, Any]:
+        """启动指定 bundle id 的 App。
+
+        ``wait=True`` 时等待其进入前台（最多 ``timeout`` 秒）；返回启动后的
+        ``current_app`` 结果。部分 App 首次启动有隐私弹窗，建议配合 ``watch()``。
+        """
+        if not bundle_id or not isinstance(bundle_id, str): raise ValueError("bundle_id must be a non-empty string")
+        code = "from ascript.ios import system\nsystem.app_start(%r)\n_result=True" % bundle_id
+        with self.locked(): self.eval_python(code)
+        if not wait: return self.current_app()
+        try:
+            return self.wait_current_app(bundle_id, timeout=timeout)
+        except LookupError:
+            raise DeviceOperationError(f"app {bundle_id!r} did not reach the foreground within {timeout}s") from None
+
+    def app_stop(self, bundle_id: str) -> None:
+        """停止指定 bundle id 的 App（等价于上划杀掉）。"""
+        if not bundle_id or not isinstance(bundle_id, str): raise ValueError("bundle_id must be a non-empty string")
+        code = "from ascript.ios import system\nsystem.app_stop(%r)\n_result=True" % bundle_id
+        with self.locked(): self.eval_python(code)
+
+    def app_state(self, bundle_id: str) -> dict[str, Any]:
+        """返回 App 运行状态：``{"code": 0-4, "state": "not_running|background|foreground"}``。
+
+        设备端 WDA 的状态码对第三方 App 不可靠（真机实测前台 App 可能返回
+        1）；因此同一帧内同时读取 ``app_current``，bundle 一致时强制判定为
+        foreground。
+        """
+        if not bundle_id or not isinstance(bundle_id, str): raise ValueError("bundle_id must be a non-empty string")
+        code = (
+            "from ascript.ios import system as s\n"
+            "import json\n"
+            "_code = s.app_state(%r)\n"
+            "_cur = ''\n"
+            "try:\n"
+            "    _cur = s.app_current().bundle_id or ''\n"
+            "except Exception:\n"
+            "    pass\n"
+            "_result = json.dumps({'code': int(_code) if _code is not None else -1, 'current': _cur})\n" % bundle_id
+        )
+        value = self.eval_python(code)
+        if not isinstance(value, dict): raise DeviceResponseError("invalid app state returned by device", body=repr(value))
+        numeric = value.get("code", -1)
+        state = self._APP_STATE_NAMES.get(numeric, "unknown")
+        if value.get("current") == bundle_id and state != "foreground": state = "foreground"
+        return {"code": numeric, "state": state}
+
+    def lock_screen(self) -> None:
+        """锁定屏幕。
+
+        设备端不提供可靠的锁屏状态查询（WDA ``/wda/locked`` 读数在部分
+        设备上不正确，已真机确认）；需要判断时可对截图做全黑检测。
+        """
+        with self.locked(): self.eval_python("from ascript.ios import system\nsystem.lock()\n_result=True")
+
+    def unlock_screen(self) -> None:
+        """解锁屏幕；已设锁屏密码的设备无法用本方法解锁，需真机输入密码。"""
+        with self.locked(): self.eval_python("from ascript.ios import system\nsystem.unlock()\n_result=True")
+
+    def get_clipboard(self) -> str:
+        """读取设备剪贴板文本。"""
+        value = self.eval_python("from ascript.ios import system\n_result=str(system.get_clipboard() or '')")
+        return value if isinstance(value, str) else str(value)
+
+    def set_clipboard(self, content: str) -> None:
+        """写入文本到设备剪贴板。"""
+        if not isinstance(content, str): raise ValueError("content must be a string")
+        with self.locked(): self.eval_python("from ascript.ios import system\nsystem.set_clipboard(%r)\n_result=True" % content)
+
+    def orientation(self) -> str:
+        """返回当前屏幕方向：``"portrait"`` 或 ``"landscape"``。
+
+        设备端 WDA 客户端未提供设置方向的接口，程序化旋转暂不可用；
+        方向跟随设备物理旋转实时变化（已真机验证）。
+        """
+        value = self.eval_python("from ascript.ios import system\n_result=str(system.screen_orientation()).split('.')[-1].lower()")
+        if not isinstance(value, str) or value not in ("portrait", "landscape"): raise DeviceResponseError("invalid orientation returned by device", body=repr(value))
+        return value
+
+    def open_url(self, url: str) -> None:
+        """通过系统 open 打开 URL 或 App 深链。"""
+        if not isinstance(url, str) or not url.strip(): raise ValueError("url must be a non-empty string")
+        with self.locked(): self.eval_python("from ascript.ios import system\nsystem.open_url(%r)\n_result=True" % url)
+
+    def dismiss_keyboard(self) -> None:
+        """尝试收起当前软键盘。"""
+        with self.locked(): self.eval_python("from ascript.ios.system import client\nclient.keyboard_dismiss()\n_result=True")
+
+    # 友好名 -> 设备端 wdapy.Keycode 枚举成员名
+    _KEY_CODES = {"home": "HOME", "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN", "power": "POWER", "power_plus_home": "POWER_PLUS_HOME", "snapshot": "SNAPSHOT"}
+
+    def press_key(self, key: str) -> None:
+        """发送按键事件。``key``：home、volume_up、volume_down、power、power_plus_home、snapshot。"""
+        try: member = self._KEY_CODES[key]
+        except KeyError: raise ValueError(f"key must be one of {sorted(self._KEY_CODES)}") from None
+        with self.locked(): self.eval_python("from ascript.ios.system import client\nfrom ascript.ios.wdapy import Keycode\nclient.press(Keycode.%s)\n_result=True" % member)
+
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
             raise ValueError("code is empty")

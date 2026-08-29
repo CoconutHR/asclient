@@ -164,6 +164,32 @@ app = client.current_app()
 assert app["bundle_id"] == "com.example.app"
 ```
 
+### App 与系统控制
+
+以下方法基于设备端内置能力（iOS 设备真机验证）；`Device`（`connect()` 返回值）提供同名委托，可直接 `device.app_start(...)` 调用。
+
+| 方法 | 说明 |
+| --- | --- |
+| `app_start(bundle_id, *, timeout=15, wait=True)` | 启动 App；`wait=True` 时等待其进入前台，超时抛 `DeviceOperationError` |
+| `app_stop(bundle_id)` | 停止 App（等价于上划杀掉） |
+| `app_state(bundle_id) -> dict` | `{"code": 0-4, "state": "foreground\|background\|not_running"}`；设备端 WDA 状态码对第三方 App 不可靠，客户端会同时读取前台 App 修正判定 |
+| `lock_screen()` / `unlock_screen()` | 锁定 / 解锁屏幕；已设密码的设备无法程序化解锁。设备端不提供可靠的锁屏状态查询（WDA `/wda/locked` 读数在部分设备不正确），需要判断时可对截图做全黑检测 |
+| `get_clipboard() -> str` / `set_clipboard(content)` | 读取 / 写入设备剪贴板文本 |
+| `orientation() -> str` | 当前屏幕方向：`"portrait"` 或 `"landscape"`；跟随物理旋转实时变化，设备端无程序化设置接口 |
+| `open_url(url)` | 打开 URL 或 App 深链（如 `myapp://page`） |
+| `dismiss_keyboard()` | 尝试收起当前软键盘 |
+| `press_key(key)` | 按键事件；`key`：`home`、`volume_up`、`volume_down`、`power`、`power_plus_home`、`snapshot` |
+
+```python
+client.app_start("com.example.game")
+client.wait(client.selector().name("start_button"), timeout=10).click()
+client.set_clipboard("invite-code-2026")
+assert client.orientation() == "landscape"
+client.press_key("home")
+```
+
+CLI 对应命令：`app-start` / `app-stop` / `app-state` / `lock` / `unlock` / `clipboard` / `orientation` / `openurl` / `key`（变更类均需 `--yes`）。
+
 ### `packages() -> list`
 
 返回设备端 Python 包列表，通常为 `[名称, 版本]` 对的列表。设备 status 未提供包信息时，客户端会调用设备端 Python 查询；因此该接口需要服务端允许执行该内部查询。

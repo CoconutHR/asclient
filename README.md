@@ -65,6 +65,13 @@ device(text="登录").click()             # 确认无误后再点击
 | 拖拽（绝对 / 比例） | `client.drag(200, 1000, 900, 1000, duration=0.5)` / `client.drag_relative(0.2, 0.5, 0.8, 0.5)` |
 | 元素长按 / 双击 / 拖到某点 | `element.long_click()` / `element.double_click()` / `element.drag_to(800, 1200)` |
 | 等目标 App 成为前台 | `client.wait_current_app("com.example.app", timeout=10)` |
+| 启动 / 停止 App | `client.app_start("com.example.app")` / `client.app_stop("com.example.app")` |
+| 查 App 运行状态 | `client.app_state("com.example.app")["state"]` |
+| 锁屏 / 解锁 | `client.lock_screen()` / `client.unlock_screen()` |
+| 读写设备剪贴板 | `client.set_clipboard("code")` / `client.get_clipboard()` |
+| 查当前屏幕方向 | `client.orientation()` |
+| 打开 URL / 深链 | `client.open_url("myapp://page")` |
+| 发送按键（home/音量/电源） | `client.press_key("home")` |
 | 查到唯一元素才点击（锁内原子） | `device.click_if_unique(device.selector().name("提交"))` |
 | 一帧中找多个模板 | `client.find_images({"成功": "success.png", "失败": "failure.png"})` |
 | 等待任意页面结果 | `name, match = client.wait_any_image({...}, timeout=20)` |

@@ -413,6 +413,17 @@ class Device:
         if not normalized: raise ValueError("watch requires at least one rule")
         return Watcher(self, normalized, interval=interval, log=log)
     def wait_current_app(self, expected: Any, *, timeout: float = 10.0, interval: float = 0.3) -> Mapping[str, Any]: return self.client.wait_current_app(expected, timeout=timeout, interval=interval)
+    def app_start(self, bundle_id: str, *, timeout: float = 15.0, wait: bool = True) -> Any: return self.client.app_start(bundle_id, timeout=timeout, wait=wait)
+    def app_stop(self, bundle_id: str) -> Any: return self.client.app_stop(bundle_id)
+    def app_state(self, bundle_id: str) -> Any: return self.client.app_state(bundle_id)
+    def lock_screen(self) -> Any: return self.client.lock_screen()
+    def unlock_screen(self) -> Any: return self.client.unlock_screen()
+    def get_clipboard(self) -> Any: return self.client.get_clipboard()
+    def set_clipboard(self, content: str) -> Any: return self.client.set_clipboard(content)
+    def orientation(self) -> Any: return self.client.orientation()
+    def open_url(self, url: str) -> Any: return self.client.open_url(url)
+    def dismiss_keyboard(self) -> Any: return self.client.dismiss_keyboard()
+    def press_key(self, key: str) -> Any: return self.client.press_key(key)
     def click_if_unique(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, duration: float | None = None, duration_ms: int | None = None) -> UiObject:
         deadline = time.monotonic() + timeout
         with self.client.locked():

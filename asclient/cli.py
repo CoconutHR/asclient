@@ -62,6 +62,15 @@ _HELP: dict[str, tuple[str, str]] = {
     "status": ("status\n查看设备可用性、屏幕尺寸和当前前台应用。", "status\nShow availability, screen size, and foreground app."),
     "pkgs": ("pkgs\n列出设备端 Python 包。", "pkgs\nList device-side Python packages."),
     "app": ("app\n显示当前前台应用信息。", "app\nShow the foreground app."),
+    "app-start": ("app-start BUNDLE_ID\n启动 App 并等待其进入前台。需要 --yes。", "app-start BUNDLE_ID\nLaunch an app and wait for it to reach the foreground. Requires --yes."),
+    "app-stop": ("app-stop BUNDLE_ID\n停止 App（等价于上划杀掉）。需要 --yes。", "app-stop BUNDLE_ID\nStop an app (same as swiping it away). Requires --yes."),
+    "app-state": ("app-state BUNDLE_ID\n查询 App 运行状态（foreground/background/not_running）。", "app-state BUNDLE_ID\nShow an app's run state (foreground/background/not_running)."),
+    "lock": ("lock\n锁定屏幕。需要 --yes。", "lock\nLock the screen. Requires --yes."),
+    "unlock": ("unlock\n解锁屏幕（无密码设备）。需要 --yes。", "unlock\nUnlock the screen (passcode-free devices). Requires --yes."),
+    "clipboard": ("clipboard [TEXT]\n读取剪贴板；传入 TEXT 则写入。写入需要 --yes。", "clipboard [TEXT]\nRead the clipboard; pass TEXT to write it. Writing requires --yes."),
+    "orientation": ("orientation\n显示当前屏幕方向（portrait/landscape）。", "orientation\nShow the current screen orientation (portrait/landscape)."),
+    "openurl": ("openurl URL\n通过系统打开 URL 或 App 深链。需要 --yes。", "openurl URL\nOpen a URL or app deep link via the system. Requires --yes."),
+    "key": ("key {home,volume_up,volume_down,power,power_plus_home,snapshot}\n发送按键事件。需要 --yes。", "key {home,volume_up,volume_down,power,power_plus_home,snapshot}\nSend a key event. Requires --yes."),
     "shot": ("shot [输出.png] [--crop-rel 左 上 右 下]\n保存真机截图，可按屏幕比例裁剪。", "shot [OUTPUT.png] [--crop-rel LEFT TOP RIGHT BOTTOM]\nSave a device screenshot with an optional relative crop."),
     "dump": ("dump [输出.xml] [--mode MODE]\n保存 XML 控件树；mode 可为 smart/full/point。", "dump [OUTPUT.xml] [--mode MODE]\nSave the XML control tree; mode can be smart/full/point."),
     "observe": ("observe [--prefix 前缀]\n同时保存截图与 XML 控件树。", "observe [--prefix PREFIX]\nSave a screenshot and the XML control tree together."),
@@ -196,6 +205,13 @@ def _parser() -> argparse.ArgumentParser:
     ev = commands.add_parser("eval"); ev.add_argument("code")
     cat = commands.add_parser("cat"); cat.add_argument("path"); cat.add_argument("output", nargs="?")
     mv = commands.add_parser("mv"); mv.add_argument("path"); mv.add_argument("new_name")
+    for name in ("app-start", "app-stop", "app-state"):
+        item = commands.add_parser(name); item.add_argument("bundle_id")
+    for name in ("lock", "unlock", "orientation"):
+        commands.add_parser(name)
+    clip = commands.add_parser("clipboard"); clip.add_argument("text", nargs="?")
+    ourl = commands.add_parser("openurl"); ourl.add_argument("url")
+    keyp = commands.add_parser("key"); keyp.add_argument("key_name")
     ocr = commands.add_parser("ocr"); ocr.add_argument("rect", nargs="?")
     for name in ("findcolor", "compare"):
         item = commands.add_parser(name); item.add_argument("colors"); item.add_argument("--diff", type=float)
@@ -338,6 +354,17 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "input": _confirm(args, client, t("action_input")); _out(client.input_text(args.text, interval_ms=args.interval))
         elif cmd == "home": _confirm(args, client, t("action_home")); _out(client.home())
         elif cmd == "app": _out(client.current_app())
+        elif cmd == "app-start": _confirm(args, client, t("action_app_start", bundle_id=args.bundle_id)); _out(client.app_start(args.bundle_id))
+        elif cmd == "app-stop": _confirm(args, client, t("action_app_stop", bundle_id=args.bundle_id)); client.app_stop(args.bundle_id)
+        elif cmd == "app-state": _out(client.app_state(args.bundle_id))
+        elif cmd == "lock": _confirm(args, client, t("action_lock")); client.lock_screen()
+        elif cmd == "unlock": _confirm(args, client, t("action_unlock")); client.unlock_screen()
+        elif cmd == "clipboard":
+            if args.text is None: _out(client.get_clipboard())
+            else: _confirm(args, client, t("action_clipboard_set")); client.set_clipboard(args.text)
+        elif cmd == "orientation": _out(client.orientation())
+        elif cmd == "openurl": _confirm(args, client, t("action_open_url", url=args.url)); client.open_url(args.url)
+        elif cmd == "key": _confirm(args, client, t("action_key", key=args.key_name)); client.press_key(args.key_name)
         elif cmd == "api":
             _confirm(args, client, t("action_api", method=args.method.upper(), path=args.path))
             params, form = json.loads(args.params), json.loads(args.form)
