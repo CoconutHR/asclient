@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应 ASClient `0.8.1`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应 ASClient `0.8.2`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -182,6 +182,10 @@ assert app["bundle_id"] == "com.example.app"
 | `device_info() -> dict` | 设备信息（model、name、uuid、locale、界面风格；缺失字段为 `None`） |
 | `battery_info() -> dict` | `{"level": 0.0-1.0, "state": "unplugged\|charging\|full\|unknown"}` |
 | `open_notification()` | 下拉打开通知中心；收起可再上滑或按 home（真机已验证） |
+| `screen_cache(enabled)` | 设备端整帧缓存开关：开启后首帧复用，批量找色/OCR 提速；画面变化时关闭 |
+| `notify(msg, title=None, notification_id="9096")` | 发送系统通知（脚本完成/告警提醒） |
+| `find_sift(templates, *, threshold=0.5, rgb=False, max_res=0, region=None, region_relative=None)` | SIFT 特征匹配（设备端原生 OpenCV），抗尺度/光照变化；`templates` 为**设备端**小图路径列表，结果坐标为截图像素并已叠加 region 偏移 |
+| `scan_code(*, region=None, region_relative=None)` | 二维码/条码识别（设备端原生 MLKitx），返回值/类型/矩形/中心 |
 
 ```python
 client.app_start("com.example.game")
@@ -629,12 +633,40 @@ client.wait_current_app("com.example.app", timeout=10)
 
 Python 动作 API 的 `duration` 单位为**秒**，例如 `duration=0.35`；`duration_ms` 是兼容的毫秒参数。两者不能同时传入，均未传时保留原动作默认值。`timeout`、`interval`、`duration` 均为秒；只有带 `_ms` 后缀的参数才是毫秒。
 
-### `tap(x, y, *, duration=None, duration_ms=None)`
+### `tap(x, y, *, duration=None, duration_ms=None, jitter=0)`
 
-点击物理像素动作坐标。它与 `screen_size()`、截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的“动作坐标”取得准确数值。
+点击物理像素动作坐标。它与 `screen_size()`、截图、OCR 返回的坐标使用同一坐标系；可用 Inspector 点击截图后显示的“动作坐标”取得准确数值。`jitter` 为随机抖动像素数（对 x/y 各加一个 `[-jitter, jitter]` 随机偏移，拟人/反检测），`tap_relative`/`click_relative` 同样支持。
 
 ```python
 client.tap(200, 600, duration=0.02)
+client.tap(200, 600, jitter=5)             # 带随机抖动的拟人点击
+```
+
+### `click_random(x1, y1, x2, y2, *, duration=None, duration_ms=None)` 与 `click_random_relative(...)`
+
+在矩形内随机点击一个点（两角顺序不限，坐标自动取整）。比例版本按 `action_size()` 换算。
+
+```python
+client.click_random(300, 500, 900, 1000)
+client.click_random_relative(0.2, 0.3, 0.6, 0.5)
+```
+
+### `slide_path(points, *, durations=None, duration=800, touch_down_duration=0, touch_up_duration=0)` 与 `slide_path_relative(...)`
+
+沿多段轨迹滑动（W3C Actions 语义），`points` 至少两个点；`durations` 为每段移动耗时毫秒列表（长度=点数-1，缺省均分 `duration`）；按下后/松开前可额外停留。比例版本的 `points` 为 0..1 比例点序列。
+
+```python
+client.slide_path([(1800, 1300), (1200, 1280), (600, 1300)], durations=[150, 150])
+client.slide_path_relative([(0.8, 0.5), (0.2, 0.5)], duration=300)
+```
+
+### `touch_and_slide(from_x, from_y, to_x, to_y, *, touch_down_duration=500, touch_move_duration=1000, touch_up_duration=500)` 与 `touch_and_slide_relative(...)`
+
+带停留的拖拽：按下停 → 移动 → 松开前停（毫秒），适合长按拖拽与滑动验证码类场景。
+
+```python
+client.touch_and_slide(600, 1300, 1800, 1300, touch_down_duration=200, touch_move_duration=300)
+client.touch_and_slide_relative(0.8, 0.5, 0.2, 0.5)
 ```
 
 ### `screen_size()`、`action_size()`、`relative_point()` 与 `tap_relative()`

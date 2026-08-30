@@ -234,12 +234,14 @@ def _parser() -> argparse.ArgumentParser:
         durations.add_argument("--duration", type=int, default=None, help="milliseconds (legacy default unit)")
         durations.add_argument("--duration-ms", "--duration_ms", dest="duration_ms", type=int, default=None)
         durations.add_argument("--duration-s", "--duration_s", dest="duration_s", type=float, default=None)
+        if name == "tap": item.add_argument("--jitter", type=int, default=0)
     for name in ("tap-rel", "swipe-rel"):
         item = commands.add_parser(name); item.add_argument("coordinates", nargs="+", type=float)
         durations = item.add_mutually_exclusive_group()
         durations.add_argument("--duration", type=int, default=None, help="milliseconds (legacy default unit)")
         durations.add_argument("--duration-ms", "--duration_ms", dest="duration_ms", type=int, default=None)
         durations.add_argument("--duration-s", "--duration_s", dest="duration_s", type=float, default=None)
+        if name == "tap-rel": item.add_argument("--jitter", type=int, default=0)
     inp = commands.add_parser("input"); inp.add_argument("text"); inp.add_argument("--interval", type=int, default=120)
     raw = commands.add_parser("api", help="call a confirmed but unwrapped API endpoint")
     raw.add_argument("method"); raw.add_argument("path"); raw.add_argument("--params", default="{}"); raw.add_argument("--form", default="{}")
@@ -344,11 +346,11 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "tap":
             if len(args.coordinates) != 2: raise ValueError(t("tap_requires"))
             _confirm(args, client, t("action_tap", coordinates=args.coordinates))
-            _out(client.tap(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
+            _out(client.tap(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration, jitter=args.jitter))
         elif cmd == "tap-rel":
             if len(args.coordinates) != 2: raise ValueError(t("tap_relative_requires"))
             _confirm(args, client, t("action_tap_relative", coordinates=args.coordinates))
-            _out(client.tap_relative(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration))
+            _out(client.tap_relative(*args.coordinates, duration=args.duration_s, duration_ms=args.duration_ms if args.duration_ms is not None else args.duration, jitter=args.jitter))
         elif cmd == "swipe":
             if len(args.coordinates) != 4: raise ValueError(t("swipe_requires"))
             _confirm(args, client, t("action_swipe", coordinates=args.coordinates))

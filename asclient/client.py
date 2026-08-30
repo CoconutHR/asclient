@@ -744,6 +744,66 @@ class AScriptClient:
         w, h = float(size["width"]), float(size["height"])
         self.swipe(w / 2, 3, w / 2, h * 0.5, duration_ms=400)
 
+    def screen_cache(self, enabled: bool) -> None:
+        """开关设备端整帧缓存：开启后首次截图复用同一帧，批量 find_color/OCR 提速；
+        画面会变化时务必关闭。等价设备端 ``screen.cache``。"""
+        with self.locked(): self.eval_python("from ascript.ios.screen import cache\ncache(%r)\n_result=True" % bool(enabled))
+
+    def notify(self, msg: str, title: str | None = None, *, notification_id: str = "9096") -> None:
+        """发送系统通知（脚本完成/告警提醒）。"""
+        if not msg or not isinstance(msg, str): raise ValueError("msg must be a non-empty string")
+        with self.locked(): self.eval_python("from ascript.ios.developer.api import oc\noc.notify(%r, %r, %r)\n_result=True" % (msg, title, notification_id))
+
+    def _resolve_capture_region(self, region: Any, region_relative: Any) -> tuple[int, int, int, int]:
+        if region is not None and region_relative is not None: raise ValueError("region and region_relative cannot be combined")
+        size = self.action_size()
+        width, height = float(size["width"]), float(size["height"])
+        if region_relative is not None:
+            l_ratio, t_ratio, r_ratio, b_ratio = (float(value) for value in region_relative)
+            if not all(0 <= value <= 1 for value in (l_ratio, t_ratio, r_ratio, b_ratio)): raise ValueError("region_relative values must be within 0..1")
+            return round(l_ratio * width), round(t_ratio * height), round(r_ratio * width), round(b_ratio * height)
+        if region is not None:
+            left, top, right, bottom = (int(value) for value in region)
+            return left, top, right, bottom
+        return 0, 0, int(width), int(height)
+
+    def find_sift(self, templates: Any, *, threshold: float = 0.5, rgb: bool = False, max_res: int = 0, region: Any = None, region_relative: Any = None) -> list[dict[str, Any]]:
+        """SIFT 特征匹配：比模板匹配更抗尺度/光照变化；在设备端原生 OpenCV 上执行。
+
+        ``templates`` 为**设备端**小图路径列表（如 ``~/res/img/x.png``）；本机模板请先
+        上传到设备。返回 ``[{"result": (x, y), "rect": (l, t, r, b), "center_x", "center_y",
+        "confidence"}]``，坐标为截图像素并已叠加 ``region`` 偏移。``max_res=0`` 返回全部命中。
+        """
+        if not templates: raise ValueError("templates must be a non-empty sequence of device-side paths")
+        paths = [str(item) for item in templates]
+        if not 0 < float(threshold) <= 1: raise ValueError("threshold must be within (0, 1]")
+        left, top, right, bottom = self._resolve_capture_region(region, region_relative)
+        code = (
+            "import json\n"
+            "from ascript.ios.screen import capture\n"
+            "from ascript.ios.developer.api import oc\n"
+            "img = capture(rect=(%d, %d, %d, %d))\n"
+            "res = oc.find_sift(img, %r, threshold=%r, rgb=%r, max_res=%d, offset_xy=(%d, %d))\n"
+            "_result = json.dumps(res)\n" % (left, top, right, bottom, paths, float(threshold), bool(rgb), int(max_res), left, top)
+        )
+        value = self.eval_python(code)
+        return value if isinstance(value, list) else []
+
+    def scan_code(self, *, region: Any = None, region_relative: Any = None) -> list[dict[str, Any]]:
+        """二维码/条码识别（设备端原生 MLKitx）。返回 ``[{"result": (x, y), "rect",
+        "center_x", "center_y", "value", "type", "format"}]``，坐标为截图像素。"""
+        left, top, right, bottom = self._resolve_capture_region(region, region_relative)
+        code = (
+            "import json\n"
+            "from ascript.ios.screen import capture\n"
+            "from ascript.ios.developer.api import oc\n"
+            "img = capture(rect=(%d, %d, %d, %d))\n"
+            "res = oc.code_scanner(img, offset_x=%d, offset_y=%d)\n"
+            "_result = json.dumps(res)\n" % (left, top, right, bottom, left, top)
+        )
+        value = self.eval_python(code)
+        return value if isinstance(value, list) else []
+
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
             raise ValueError("code is empty")
@@ -755,10 +815,51 @@ class AScriptClient:
                 return value
         return value
 
-    def tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
-        """点击物理像素 ``x/y``；``duration`` 单位秒。"""
+    def tap(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None, jitter: int = 0) -> Any:
+        """点击物理像素 ``x/y``；``duration`` 单位秒；``jitter`` 为随机抖动像素数(拟人)。"""
         milliseconds = self._duration_ms(duration, duration_ms, default_ms=20)
-        with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r)\n_result=True" % (x, y, milliseconds))
+        jitter = int(jitter or 0)
+        if jitter < 0: raise ValueError("jitter must be a non-negative integer")
+        with self.locked(): return self.eval_python("from ascript.ios.action import click\nclick(%r, %r, %r, %r)\n_result=True" % (x, y, milliseconds, jitter))
+
+    def click_random(self, x1: float, y1: float, x2: float, y2: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """在矩形 ``(x1,y1)-(x2,y2)`` 内随机点击一个点(物理像素,两角顺序不限)。"""
+        milliseconds = self._duration_ms(duration, duration_ms, default_ms=20)
+        corners = (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), milliseconds)
+        with self.locked(): return self.eval_python("from ascript.ios.action import click_random\nclick_random(%r, %r, %r, %r, %r)\n_result=True" % corners)
+
+    def click_random_relative(self, x1_ratio: float, y1_ratio: float, x2_ratio: float, y2_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
+        """``click_random`` 的比例坐标版本。"""
+        a = self.relative_point(x1_ratio, y1_ratio)
+        b = self.relative_point(x2_ratio, y2_ratio)
+        return self.click_random(a[0], a[1], b[0], b[1], duration=duration, duration_ms=duration_ms)
+
+    def slide_path(self, points: Any, *, durations: Any = None, duration: int = 800, touch_down_duration: int = 0, touch_up_duration: int = 0) -> Any:
+        """沿多段轨迹滑动(物理像素点序列,至少两个点)。
+
+        ``durations`` 为每段移动耗时(毫秒)列表,长度须为点数减一;
+        缺省时把 ``duration`` 均分到各段。``touch_down_duration``/``touch_up_duration``
+        为按下后/松开前的额外停留毫秒数。
+        """
+        pts = [[float(point[0]), float(point[1])] for point in points]
+        if len(pts) < 2: raise ValueError("slide_path requires at least two points")
+        durations_json = json.dumps([int(item) for item in durations]) if durations is not None else "None"
+        with self.locked(): return self.eval_python("import json\nfrom ascript.ios.action import slide_path\nslide_path(json.loads(%r), duration=%d, durations=%s, touch_down_duration=%d, touch_up_duration=%d)\n_result=True" % (json.dumps(pts), int(duration), durations_json, int(touch_down_duration), int(touch_up_duration)))
+
+    def slide_path_relative(self, points: Any, *, durations: Any = None, duration: int = 800, touch_down_duration: int = 0, touch_up_duration: int = 0) -> Any:
+        """``slide_path`` 的比例坐标版本;``points`` 为 0..1 比例点序列。"""
+        absolute = [self.relative_point(point[0], point[1]) for point in points]
+        return self.slide_path(absolute, durations=durations, duration=duration, touch_down_duration=touch_down_duration, touch_up_duration=touch_up_duration)
+
+    def touch_and_slide(self, from_x: float, from_y: float, to_x: float, to_y: float, *, touch_down_duration: int = 500, touch_move_duration: int = 1000, touch_up_duration: int = 500) -> Any:
+        """带停留的拖拽:按下停 ``touch_down_duration`` 毫秒 → 移动 ``touch_move_duration`` 毫秒 → 松开前停 ``touch_up_duration`` 毫秒。"""
+        with self.locked(): return self.eval_python("from ascript.ios.action import touch_and_slide\ntouch_and_slide(%r, %r, %r, %r, %r, %r, %r)\n_result=True" % (from_x, from_y, to_x, to_y, touch_down_duration / 1000.0, touch_move_duration / 1000.0, touch_up_duration / 1000.0))
+
+    def touch_and_slide_relative(self, from_x_ratio: float, from_y_ratio: float, to_x_ratio: float, to_y_ratio: float, *, touch_down_duration: int = 500, touch_move_duration: int = 1000, touch_up_duration: int = 500) -> Any:
+        """``touch_and_slide`` 的比例坐标版本。"""
+        start = self.relative_point(from_x_ratio, from_y_ratio)
+        end = self.relative_point(to_x_ratio, to_y_ratio)
+        return self.touch_and_slide(start[0], start[1], end[0], end[1], touch_down_duration=touch_down_duration, touch_move_duration=touch_move_duration, touch_up_duration=touch_up_duration)
 
     def long_press(self, x: float, y: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
         """在物理像素 ``x/y`` 长按；默认 0.8 秒。"""
@@ -850,9 +951,9 @@ class AScriptClient:
         # Keep 1.0 within the valid final coordinate while retaining fractional points elsewhere.
         return min(size["width"] - 1, size["width"] * x_ratio), min(size["height"] - 1, size["height"] * y_ratio)
 
-    def tap_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
-        """按屏幕比例点击；``duration`` 单位秒。"""
-        return self.tap(*self.relative_point(x_ratio, y_ratio), **({"duration": duration} if duration is not None else {"duration_ms": duration_ms} if duration_ms is not None else {}))
+    def tap_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None, jitter: int = 0) -> Any:
+        """按屏幕比例点击；``duration`` 单位秒；``jitter`` 为随机抖动像素数。"""
+        return self.tap(*self.relative_point(x_ratio, y_ratio), **({"duration": duration} if duration is not None else {"duration_ms": duration_ms} if duration_ms is not None else {}), jitter=jitter)
 
     def long_press_relative(self, x_ratio: float, y_ratio: float, *, duration: float | None = None, duration_ms: int | None = None) -> Any:
         return self.long_press(*self.relative_point(x_ratio, y_ratio), duration=duration, duration_ms=duration_ms)

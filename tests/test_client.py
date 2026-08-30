@@ -363,6 +363,82 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(scrolls), 2)
         self.assertEqual(scrolls[0][0], "down")
 
+    def test_tap_jitter_and_random_click_encode(self):
+        captured: list[str] = []
+        original_eval, original_point = self.client.eval_python, self.client.relative_point
+        self.client.eval_python = lambda code: (captured.append(code), True)[1]
+        self.client.relative_point = lambda xr, yr: (xr * 1000, yr * 2000)
+        try:
+            self.client.tap(100, 200, jitter=5)
+            with self.assertRaises(ValueError): self.client.tap(1, 2, jitter=-1)
+            self.client.click_random(0, 0, 500, 800)
+            self.client.click_random_relative(0.1, 0.2, 0.3, 0.4)
+        finally:
+            self.client.eval_python, self.client.relative_point = original_eval, original_point
+        joined = "\n".join(captured)
+        self.assertIn("click(100, 200, 20, 5)", joined)
+        self.assertIn("click_random(0, 0, 500, 800, 20)", joined)
+        self.assertIn("click_random(100, 400, 300, 800, 20)", joined)
+
+    def test_slide_path_variants_encode_and_validate(self):
+        captured: list[str] = []
+        original_eval, original_point = self.client.eval_python, self.client.relative_point
+        self.client.eval_python = lambda code: (captured.append(code), True)[1]
+        self.client.relative_point = lambda xr, yr: (xr * 1000, yr * 2000)
+        try:
+            self.client.slide_path([(10, 20), (30, 40)], durations=[100], touch_down_duration=50)
+            self.client.slide_path_relative([(0.1, 0.1), (0.5, 0.5)])
+            with self.assertRaises(ValueError): self.client.slide_path([(1, 2)])
+        finally:
+            self.client.eval_python, self.client.relative_point = original_eval, original_point
+        joined = "\n".join(captured)
+        self.assertIn("slide_path(json.loads('[[10.0, 20.0], [30.0, 40.0]]'), duration=800, durations=[100], touch_down_duration=50, touch_up_duration=0)", joined)
+        self.assertIn("[[100.0, 200.0], [500.0, 1000.0]]", joined)
+
+    def test_touch_and_slide_variants_encode(self):
+        captured: list[str] = []
+        original_eval, original_point = self.client.eval_python, self.client.relative_point
+        self.client.eval_python = lambda code: (captured.append(code), True)[1]
+        self.client.relative_point = lambda xr, yr: (xr * 1000, yr * 2000)
+        try:
+            self.client.touch_and_slide(1, 2, 3, 4)
+            self.client.touch_and_slide_relative(0.1, 0.2, 0.3, 0.4)
+        finally:
+            self.client.eval_python, self.client.relative_point = original_eval, original_point
+        joined = "\n".join(captured)
+        self.assertIn("touch_and_slide(1, 2, 3, 4, 0.5, 1.0, 0.5)", joined)
+        self.assertIn("touch_and_slide(100.0, 400.0, 300.0, 800.0, 0.5, 1.0, 0.5)", joined)
+
+    def test_screen_cache_notify_find_sift_and_scan_code(self):
+        captured: list[str] = []
+        original_eval, original_size = self.client.eval_python, self.client.action_size
+        def fake_eval(code):
+            captured.append(code)
+            if "find_sift" in code: return [{"result": [1, 2], "confidence": 0.9}]
+            if "code_scanner" in code: return [{"value": "hi"}]
+            return True
+        self.client.eval_python = fake_eval
+        self.client.action_size = lambda: {"width": 1000.0, "height": 2000.0}
+        try:
+            self.client.screen_cache(True)
+            self.client.notify("done", title="stage", notification_id="id1")
+            hits = self.client.find_sift(["~/res/img/a.png"], threshold=0.8, region_relative=(0, 0, 0.5, 0.5))
+            codes = self.client.scan_code()
+        finally:
+            self.client.eval_python, self.client.action_size = original_eval, original_size
+        joined = "\n".join(captured)
+        self.assertIn("cache(True)", joined)
+        self.assertIn("oc.notify('done', 'stage', 'id1')", joined)
+        self.assertIn("capture(rect=(0, 0, 500, 1000))", joined)
+        self.assertIn("oc.find_sift(img, ['~/res/img/a.png'], threshold=0.8, rgb=False, max_res=0, offset_xy=(0, 0))", joined)
+        self.assertNotIn("\\\\", joined)
+        self.assertIn("oc.code_scanner(img, offset_x=0, offset_y=0)", joined)
+        self.assertEqual(hits[0]["confidence"], 0.9)
+        self.assertEqual(codes[0]["value"], "hi")
+        with self.assertRaises(ValueError): self.client.find_sift([])
+        with self.assertRaises(ValueError): self.client.find_sift(["a.png"], threshold=2)
+        with self.assertRaises(ValueError): self.client.scan_code(region=(0, 0, 1, 1), region_relative=(0, 0, 1, 1))
+
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
@@ -381,7 +457,7 @@ class ClientTests(unittest.TestCase):
             Device(self.client).click_rel(0.5, 0.92, duration_ms=30)
         finally:
             self.client.json, self.client.tap, self.client.screenshot = original_json, original_tap, original_screenshot
-        self.assertEqual(tapped, [(589.5, 2351.52, {"duration_ms": 30})])
+        self.assertEqual(tapped, [(589.5, 2351.52, {"duration_ms": 30, "jitter": 0})])
         with self.assertRaises(ValueError): self.client.relative_point(-0.1, 0.5)
         with self.assertRaises(ValueError): self.client.relative_point(float("nan"), 0.5)
 
@@ -879,7 +955,7 @@ class ClientTests(unittest.TestCase):
             self.client.drag(1, 2, 3, 4, duration=.5)
         finally:
             self.client.eval_python = original
-        self.assertIn("click(1, 2, 650)", calls[0])
+        self.assertIn("click(1, 2, 650, 0)", calls[0])
         self.assertIn("slide(1, 2, 3, 4, 500)", calls[1])
 
     def test_pixel_color_parsing_and_region_assertions(self):

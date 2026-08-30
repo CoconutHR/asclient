@@ -73,6 +73,15 @@ device(text="登录").click()             # 确认无误后再点击
 | 打开 URL / 深链 | `client.open_url("myapp://page")` |
 | 发送按键（home/音量/电源） | `client.press_key("home")` |
 | 读取元素文本 | `device(label="标题").get_text()` |
+| 清空元素文本 | 暂不可用（设备端限制，见 API 参考 `get_text` 行） |
+| 多段轨迹滑动 | `client.slide_path([(1800, 1300), (600, 1300)], durations=[150, 150])` |
+| 长按拖拽（三段停留） | `client.touch_and_slide(600, 1300, 1800, 1300)` |
+| 矩形内随机点击 | `client.click_random(300, 500, 900, 1000)` |
+| 拟人抖动点击 | `client.tap(600, 1300, jitter=5)` |
+| SIFT 特征匹配 | `client.find_sift(["~/res/img/x.png"], threshold=0.7)` |
+| 二维码/条码识别 | `client.scan_code()` |
+| 设备端整帧缓存 | `client.screen_cache(True)`（批量找色/OCR 前开） |
+| 系统通知 | `client.notify("跑完了", title="asclient")` |
 | 元素内滚动 / 滚动查找 | `element.scroll("down", 0.8)` / `element.scroll_to(device.selector().name("目标"))` |
 | 查电池 / 设备信息 | `client.battery_info()` / `client.device_info()` |
 | 查到唯一元素才点击（锁内原子） | `device.click_if_unique(device.selector().name("提交"))` |
