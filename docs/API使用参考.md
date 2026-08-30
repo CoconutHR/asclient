@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应 ASClient `0.9.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应已发布的 ASClient `0.9.0`。标记为 `0.9.1（未发布）` 的能力仅存在于当前主分支，尚未包含在 `v0.9.0` tag；除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -24,7 +24,7 @@ device = connect("192.168.3.17:9096")
 
 ## 2. 地址、连接与异常
 
-### `AScriptClient(address, *, password="", timeout=15.0, retries=1, coordinate_cache_ttl=1.0, lock_id=None)`
+### `AScriptClient(address, *, password="", timeout=15.0, retries=1, coordinate_cache_ttl=1.0, lock_id=None, lock_timeout=None)`
 
 创建低层客户端。
 
@@ -35,6 +35,7 @@ device = connect("192.168.3.17:9096")
 | `timeout` | 单次 HTTP/WebSocket 建连超时，单位秒 |
 | `retries` | 仅连接失败时的重试次数；HTTP 和业务错误不重试 |
 | `lock_id` | 可选的跨进程设备锁标识；未传时使用规范化的 `HOST:PORT`。同一物理设备通过不同地址访问时应显式指定同一值 |
+| `lock_timeout` | 可选的设备锁获取上限，单位秒；`None`（默认）无限等待，超时抛出 `DeviceLockTimeoutError` |
 
 ```python
 client = AScriptClient("192.168.3.17:9096", password="secret", timeout=20, retries=1)
@@ -43,7 +44,7 @@ print(client.base_url)  # http://192.168.3.17:9096
 
 ### `connect(address, **options) -> Device`
 
-`AScriptClient` 的 UI 自动化门面。支持与构造函数相同的 `password`、`timeout`、`retries`。
+`AScriptClient` 的 UI 自动化门面。支持与构造函数相同的 `password`、`timeout`、`retries`、`lock_id`、`lock_timeout`。
 
 ```python
 from asclient import connect
@@ -96,6 +97,7 @@ with IProxyTunnel(local_port=9096, remote_port=9096, udid="") as tunnel:
 | `DeviceConnectionError` | 无法连接设备服务 | 检查地址、Wi-Fi、端口和服务开关；可在用例边界有限重试 |
 | `DeviceResponseError` | HTTP 错误、返回格式不正确 | 检查 `.status` 和 `.body`，保留证据；不要直接无条件重放 |
 | `DeviceOperationError` | 设备端成功接收请求但业务执行失败 | 检查项目名、路径、页面状态或设备端日志 |
+| `DeviceLockTimeoutError` | 在设定时限内无法取得本机跨进程设备锁 | 检查 `.lock_id`、`.timeout` 和其他本机自动化进程；在用例边界排队或有限重试 |
 | `ProtocolError` | WebSocket 日志协议异常 | 检查 10102 端口和服务版本 |
 | `ValueError` | 客户端参数非法 | 在本地修正参数；不会向设备发送请求 |
 
@@ -758,9 +760,11 @@ with Run(device, artifacts_root="artifacts") as run:
 
 `manifest.json` 会在每个步骤结束后更新，记录运行 ID、设备地址、开始/结束时间、步骤耗时、结果、异常和实际写入的证据路径。
 
-### `AScriptClient.locked()`
+### `AScriptClient.locked(timeout=_default)`
 
 返回按设备共享的可重入互斥上下文。它保留同一 Python 进程内的线程互斥，并在最外层持有本机跨 Python 进程的文件锁。`tap`、`swipe`、`input_text`、`home`、`eval_python`、项目运行/部署、文件写入和删除操作已自动使用它；通常不需要手动调用。
+
+`lock_timeout` 会为自动和手动锁定设置统一的获取 deadline，覆盖线程锁与文件锁；`None` 保留无限等待兼容行为，超时抛出 `DeviceLockTimeoutError`。手动调用 `client.locked(timeout=...)` 可单次覆盖客户端默认值，传入 `None` 可显式使用无限等待。
 
 默认锁 ID 是规范化的 `HOST:PORT`；需要通过 Wi-Fi 地址和 USB 隧道地址协调同一台设备时，构造 `AScriptClient` 或调用 `connect()` 时传入相同的 `lock_id`。锁文件按稳定哈希存于系统临时目录并长期保留，仅协调同一台主机，跨物理主机仍需 CI 队列或外部调度器。
 

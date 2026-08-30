@@ -22,6 +22,16 @@ class DeviceOperationError(AScriptError):
     """The device accepted a request but reported an operation failure."""
 
 
+class DeviceLockTimeoutError(AScriptError):
+    """Acquiring the local cross-process device lock timed out."""
+
+    def __init__(self, lock_id: object, timeout: float | None = None):
+        self.lock_id = str(lock_id)
+        self.timeout = timeout
+        detail = "without a timeout" if timeout is None else f"after {timeout:g}s"
+        super().__init__(f"timed out acquiring device lock {detail}: {self.lock_id}")
+
+
 class ProtocolError(AScriptError):
     """An invalid WebSocket or AScript response was received."""
 

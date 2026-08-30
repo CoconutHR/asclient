@@ -88,6 +88,7 @@ _SWIPE_DIRECTIONS = {
     "下": (0.5, 0.2, 0.5, 0.8), "上": (0.5, 0.8, 0.5, 0.2),
     "左": (0.8, 0.5, 0.2, 0.5), "右": (0.2, 0.5, 0.8, 0.5),
 }
+_DEFAULT_LOCK_TIMEOUT = object()
 
 
 def swipe_gesture(direction: str = "down", swipe_relative: tuple[float, float, float, float] | None = None, x1_ratio: float | None = None, y1_ratio: float | None = None, x2_ratio: float | None = None, y2_ratio: float | None = None) -> tuple[float, float, float, float]:
@@ -122,10 +123,18 @@ class AScriptClient:
     ``timeout`` 单位为秒。所有公开坐标均使用截图物理像素。
     """
 
-    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1, coordinate_cache_ttl: float = 1.0, lock_id: str | None = None):
+    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1, coordinate_cache_ttl: float = 1.0, lock_id: str | None = None, lock_timeout: float | None = None):
         self.address = DeviceAddress.parse(address)
         self.lock_id = lock_id
         self.password, self.timeout, self.retries = password, float(timeout), max(0, int(retries))
+        if lock_timeout is not None:
+            try:
+                lock_timeout = float(lock_timeout)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("lock_timeout must be a finite non-negative number of seconds") from exc
+            if not math.isfinite(lock_timeout) or lock_timeout < 0 or lock_timeout > threading.TIMEOUT_MAX:
+                raise ValueError("lock_timeout must be a finite non-negative number of seconds")
+        self.lock_timeout = lock_timeout
         if not math.isfinite(coordinate_cache_ttl) or coordinate_cache_ttl < 0: raise ValueError("coordinate_cache_ttl must be a finite non-negative number of seconds")
         self.coordinate_cache_ttl = float(coordinate_cache_ttl)
         self._space_cache: tuple[float, dict[str, float], dict[str, float]] | None = None
@@ -134,9 +143,9 @@ class AScriptClient:
     def base_url(self) -> str:
         return f"http://{self.address}"
 
-    def locked(self):
+    def locked(self, *, timeout: float | None | object = _DEFAULT_LOCK_TIMEOUT):
         """Return the reentrant cross-process mutex for actions against this device."""
-        return device_lock(self.address, lock_id=self.lock_id)
+        return device_lock(self.address, lock_id=self.lock_id, timeout=self.lock_timeout if timeout is _DEFAULT_LOCK_TIMEOUT else timeout)
 
     def _headers(self, extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
         result = dict(extra or {})
