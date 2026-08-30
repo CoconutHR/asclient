@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -12,8 +13,16 @@ from typing import TYPE_CHECKING, Iterable
 if TYPE_CHECKING:
     from .client import ImageMatch
 
-_TEMPLATE_CACHE: OrderedDict[tuple[str, int, int], object] = OrderedDict()
+@dataclass(frozen=True)
+class _TemplateData:
+    image: object
+    rgb: bytes
+    samples: tuple[tuple[int, int, tuple[int, int, int]], ...]
+
+
+_TEMPLATE_CACHE: OrderedDict[tuple[str, int, int], _TemplateData] = OrderedDict()
 _TEMPLATE_CACHE_LIMIT = 32
+_TEMPLATE_CACHE_LOCK = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,7 @@ class ScreenFrame:
         with Image.open(BytesIO(self.png)) as source: self._image = source.convert("RGBA")
         self.width, self.height = self._image.size
         self._rgb = None
+        self._rgb_bytes = None
 
     @property
     def size(self) -> dict[str, float]: return {"width": float(self.width), "height": float(self.height)}
@@ -139,36 +149,89 @@ class ScreenFrame:
         try: from PIL import Image
         except ImportError as exc: raise RuntimeError("image matching requires Pillow; reinstall asclient to install its dependencies") from exc
         if isinstance(template, bytes):
-            with Image.open(BytesIO(template)) as source: return source.convert("RGB")
+            with Image.open(BytesIO(template)) as source: decoded = source.convert("RGB")
+            return ScreenFrame._template_data(decoded)
         path = Path(template).resolve(); stat = path.stat(); key = (str(path), stat.st_mtime_ns, stat.st_size)
-        cached = _TEMPLATE_CACHE.get(key)
-        if cached is not None:
-            _TEMPLATE_CACHE.move_to_end(key); return cached.copy()
+        with _TEMPLATE_CACHE_LOCK:
+            cached = _TEMPLATE_CACHE.get(key)
+            if cached is not None:
+                _TEMPLATE_CACHE.move_to_end(key); return cached
         with Image.open(path) as source: decoded = source.convert("RGB")
-        _TEMPLATE_CACHE[key] = decoded.copy()
-        while len(_TEMPLATE_CACHE) > _TEMPLATE_CACHE_LIMIT: _TEMPLATE_CACHE.popitem(last=False)
-        return decoded
+        data = ScreenFrame._template_data(decoded)
+        with _TEMPLATE_CACHE_LOCK:
+            existing = _TEMPLATE_CACHE.get(key)
+            if existing is not None:
+                _TEMPLATE_CACHE.move_to_end(key); return existing
+            _TEMPLATE_CACHE[key] = data
+            while len(_TEMPLATE_CACHE) > _TEMPLATE_CACHE_LIMIT: _TEMPLATE_CACHE.popitem(last=False)
+        return data
+
+    @staticmethod
+    def _template_data(image):
+        width, height = image.size; pixels = image.load()
+        sample_x = sorted({round(index * (width - 1) / 7) for index in range(8)})
+        sample_y = sorted({round(index * (height - 1) / 7) for index in range(8)})
+        return _TemplateData(image, image.tobytes(), tuple((x, y, pixels[x, y]) for y in sample_y for x in sample_x))
+
+    def _find_exact(self, needle: _TemplateData, region: tuple[int, int, int, int]) -> "ImageMatch | None":
+        from .client import ImageMatch
+
+        if self._rgb_bytes is None:
+            self._rgb_bytes = self._rgb.tobytes()
+        x0, y0, x1, y1 = region
+        template_width, template_height = needle.image.size
+        row_size = template_width * 3
+        stride = self.width * 3
+        first_row = needle.rgb[:row_size]
+        source = self._rgb_bytes
+        for y in range(y0, y1 - template_height + 1):
+            row_start = y * stride + x0 * 3
+            row_end = y * stride + (x1 - template_width) * 3
+            offset = source.find(first_row, row_start, row_end + row_size)
+            while offset >= 0 and offset <= row_end:
+                if (offset - y * stride) % 3 == 0:
+                    x = (offset - y * stride) // 3
+                    if all(
+                        source[offset + ty * stride:offset + ty * stride + row_size]
+                        == needle.rgb[ty * row_size:(ty + 1) * row_size]
+                        for ty in range(1, template_height)
+                    ):
+                        return ImageMatch(x, y, template_width, template_height, 1.0)
+                offset = source.find(first_row, offset + 1, row_end + row_size)
+        return None
 
     def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> "ImageMatch | None":
         from .client import ImageMatch
         if not math.isfinite(confidence) or not 0 < confidence <= 1: raise ValueError("confidence must be a finite number in (0, 1]")
         needle = self._template(template)
         if self._rgb is None: self._rgb = self._image.convert("RGB")
-        haystack = self._rgb; template_width, template_height = needle.size; x0, y0, x1, y1 = self._region(region, region_relative, region_pixels)
+        haystack = self._rgb; template_width, template_height = needle.image.size; x0, y0, x1, y1 = self._region(region, region_relative, region_pixels)
         if template_width > x1 - x0 or template_height > y1 - y0: return None
-        source_pixels, template_pixels = haystack.load(), needle.load()
-        sample_x = sorted({round(index * (template_width - 1) / 7) for index in range(8)}); sample_y = sorted({round(index * (template_height - 1) / 7) for index in range(8)})
-        sample_count = len(sample_x) * len(sample_y) * 3; allowed = (1 - confidence) * 255 * sample_count; best = None
+        if confidence == 1:
+            return self._find_exact(needle, (x0, y0, x1, y1))
+        exact = self._find_exact(needle, (x0, y0, x1, y1))
+        if exact is not None:
+            return exact
+        source_pixels, template_pixels = haystack.load(), needle.image.load()
+        pixel_count = template_width * template_height * 3
+        allowed = (1 - confidence) * 255 * pixel_count
+        best = None
         for y in range(y0, y1 - template_height + 1):
             for x in range(x0, x1 - template_width + 1):
                 error = 0
-                for ty in sample_y:
-                    for tx in sample_x:
+                for tx, ty, two in needle.samples:
+                    one = source_pixels[x + tx, y + ty]
+                    error += abs(one[0] - two[0]) + abs(one[1] - two[1]) + abs(one[2] - two[2])
+                    if error > allowed: break
+                if error > allowed: continue
+                error = 0
+                for ty in range(template_height):
+                    for tx in range(template_width):
                         one, two = source_pixels[x + tx, y + ty], template_pixels[tx, ty]
                         error += abs(one[0] - two[0]) + abs(one[1] - two[1]) + abs(one[2] - two[2])
                         if error > allowed: break
                     if error > allowed: break
-                score = 1 - error / (255 * sample_count)
+                score = 1 - error / (255 * pixel_count)
                 if error <= allowed and (best is None or score > best.confidence): best = ImageMatch(x, y, template_width, template_height, score)
         return best
 

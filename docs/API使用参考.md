@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应 ASClient `0.8.3`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应 ASClient `0.9.0`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -24,7 +24,7 @@ device = connect("192.168.3.17:9096")
 
 ## 2. 地址、连接与异常
 
-### `AScriptClient(address, *, password="", timeout=15.0, retries=1, coordinate_cache_ttl=1.0)`
+### `AScriptClient(address, *, password="", timeout=15.0, retries=1, coordinate_cache_ttl=1.0, lock_id=None)`
 
 创建低层客户端。
 
@@ -34,6 +34,7 @@ device = connect("192.168.3.17:9096")
 | `password` | 设备服务密码；客户端以 `airscript` Cookie 发送 |
 | `timeout` | 单次 HTTP/WebSocket 建连超时，单位秒 |
 | `retries` | 仅连接失败时的重试次数；HTTP 和业务错误不重试 |
+| `lock_id` | 可选的跨进程设备锁标识；未传时使用规范化的 `HOST:PORT`。同一物理设备通过不同地址访问时应显式指定同一值 |
 
 ```python
 client = AScriptClient("192.168.3.17:9096", password="secret", timeout=20, retries=1)
@@ -454,7 +455,7 @@ client.tap(*target.center)
 client.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration=0.65)
 ```
 
-模板匹配依赖 Pillow，随 `asclient` 一起安装。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
+模板匹配依赖 Pillow，随 `asclient` 一起安装。相同分辨率下的原图模板会优先走完整 RGB 精确匹配快路径；确实需要容差的候选才进入完整置信度计算。容差匹配会随搜索面积和模板面积增加计算量，生产脚本应尽量传入 `region` / `region_relative`，并复用同一个 `ScreenFrame`。`scripts/benchmark-vision.py` 可在目标 Windows 主机和设备上测量常见模板尺寸，默认只输出 JSON，不保存设备截图。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
 
 ### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
 
@@ -759,9 +760,9 @@ with Run(device, artifacts_root="artifacts") as run:
 
 ### `AScriptClient.locked()`
 
-返回同一 Python 进程内、按设备 `HOST:PORT` 共享的可重入互斥上下文。`tap`、`swipe`、`input_text`、`home`、`eval_python`、项目运行/部署、文件写入和删除操作已自动使用它；通常不需要手动调用。
+返回按设备共享的可重入互斥上下文。它保留同一 Python 进程内的线程互斥，并在最外层持有本机跨 Python 进程的文件锁。`tap`、`swipe`、`input_text`、`home`、`eval_python`、项目运行/部署、文件写入和删除操作已自动使用它；通常不需要手动调用。
 
-该锁不跨 Python 进程、CI runner 或物理主机。多进程并行执行同一手机时，仍需由 CI 队列、文件锁或外部调度器保证每台设备同时只有一个作业。
+默认锁 ID 是规范化的 `HOST:PORT`；需要通过 Wi-Fi 地址和 USB 隧道地址协调同一台设备时，构造 `AScriptClient` 或调用 `connect()` 时传入相同的 `lock_id`。锁文件按稳定哈希存于系统临时目录并长期保留，仅协调同一台主机，跨物理主机仍需 CI 队列或外部调度器。
 
 ## 7. 交互动作与设备端代码
 

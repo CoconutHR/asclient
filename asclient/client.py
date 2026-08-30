@@ -1,13 +1,11 @@
 """AScript local-device client. Public APIs are synchronous and dependency-free."""
 from __future__ import annotations
 
-import base64
 import copy
 import json
 import math
 import re
 import secrets
-import socket
 import struct
 import threading
 import time
@@ -23,6 +21,7 @@ from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, D
 from .i18n import t
 from .runtime import device_lock
 from .vision import PixelColor, ScreenFrame, relative_point as _relative_frame_point
+from ._websocket import WebSocket
 
 
 @dataclass(frozen=True)
@@ -123,8 +122,9 @@ class AScriptClient:
     ``timeout`` 单位为秒。所有公开坐标均使用截图物理像素。
     """
 
-    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1, coordinate_cache_ttl: float = 1.0):
+    def __init__(self, address: str | DeviceAddress, *, password: str = "", timeout: float = 15.0, retries: int = 1, coordinate_cache_ttl: float = 1.0, lock_id: str | None = None):
         self.address = DeviceAddress.parse(address)
+        self.lock_id = lock_id
         self.password, self.timeout, self.retries = password, float(timeout), max(0, int(retries))
         if not math.isfinite(coordinate_cache_ttl) or coordinate_cache_ttl < 0: raise ValueError("coordinate_cache_ttl must be a finite non-negative number of seconds")
         self.coordinate_cache_ttl = float(coordinate_cache_ttl)
@@ -135,8 +135,8 @@ class AScriptClient:
         return f"http://{self.address}"
 
     def locked(self):
-        """Return the process-local mutex for actions against this device."""
-        return device_lock(self.address)
+        """Return the reentrant cross-process mutex for actions against this device."""
+        return device_lock(self.address, lock_id=self.lock_id)
 
     def _headers(self, extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
         result = dict(extra or {})
@@ -442,7 +442,9 @@ class AScriptClient:
 
     def find_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> tuple[str, ImageMatch] | None:
         """在一张截图中寻找任意模板，返回第一个命中的名称和结果。"""
-        for name, match in self.find_images(templates, confidence=confidence, regions=regions, regions_relative=regions_relative, regions_pixels=regions_pixels).items():
+        frame = self.capture_frame()
+        for name, template in templates.items():
+            match = frame.find_image(template, confidence=confidence, region=(regions or {}).get(name), region_relative=(regions_relative or {}).get(name), region_pixels=(regions_pixels or {}).get(name))
             if match is not None:
                 return name, match
         return None
@@ -1081,9 +1083,6 @@ class AScriptClient:
         return OcrResult(tuple(items), payload)
 
     def find_ocr_text(self, text: str, *, contains: bool = True, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> list[OcrItem]:
-        return [item for item in self.ocr(region=region, region_relative=region_relative).items if text in item.text if contains] if contains else [item for item in self.ocr(region=region, region_relative=region_relative).items if item.text == text]
-
-    def find_ocr_text(self, text: str, *, contains: bool = True, region: tuple[int, int, int, int] | None = None, region_relative: tuple[float, float, float, float] | None = None) -> list[OcrItem]:
         result = self.ocr(region=region, region_relative=region_relative)
         return [item for item in result.items if text in item.text] if contains else [item for item in result.items if item.text == text]
 
@@ -1257,46 +1256,76 @@ class AScriptClient:
         """
         deadline = time.monotonic() + duration if duration is not None else None
         remaining = max(0, int(reconnects))
+        if deadline is not None and time.monotonic() >= deadline:
+            return
         while not stop_event or not stop_event.is_set():
             try:
                 complete = yield from self._logs_once(deadline=deadline, stop_event=stop_event)
-                if complete: return
-                if remaining <= 0: return
+                if complete or remaining <= 0:
+                    return
                 remaining -= 1
-                if deadline is not None and time.monotonic() >= deadline: return
-                time.sleep(max(0.0, reconnect_delay))
+                if not self._wait_to_reconnect(reconnect_delay, deadline, stop_event):
+                    return
             except (DeviceConnectionError, ProtocolError, OSError):
-                if remaining <= 0: raise
+                if remaining <= 0:
+                    raise
                 remaining -= 1
-                if deadline is not None and time.monotonic() >= deadline: return True
-                time.sleep(max(0.0, reconnect_delay))
+                if not self._wait_to_reconnect(reconnect_delay, deadline, stop_event):
+                    return
+
+    @staticmethod
+    def _wait_to_reconnect(delay: float, deadline: Optional[float], stop_event: Optional[threading.Event]) -> bool:
+        wait = max(0.0, delay)
+        if deadline is not None:
+            wait = min(wait, max(0.0, deadline - time.monotonic()))
+            if wait <= 0:
+                return False
+        if stop_event is not None:
+            return not stop_event.wait(wait)
+        time.sleep(wait)
+        return deadline is None or time.monotonic() < deadline
 
     def _logs_once(self, *, deadline: Optional[float], stop_event: Optional[threading.Event]) -> Iterator[LogEntry]:
+        headers = {"Cookie": f"airscript={self.password}"} if self.password else None
+        connect_timeout = self.timeout
+        if deadline is not None:
+            connect_timeout = min(connect_timeout, max(0.001, deadline - time.monotonic()))
         try:
-            sock = socket.create_connection((self.address.host, 10102), timeout=self.timeout)
+            websocket = WebSocket.connect(self.address.host, 10102, "/log/", timeout=connect_timeout, headers=headers, deadline=deadline, stop_event=stop_event)
+        except TimeoutError:
+            if (deadline is not None and time.monotonic() >= deadline) or (stop_event is not None and stop_event.is_set()):
+                return True
+            raise
         except OSError as exc:
             raise DeviceConnectionError(t("cannot_reach_logs", host=self.address.host, detail=exc)) from exc
         try:
-            key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
-            headers = ["GET /log/ HTTP/1.1", f"Host: {self.address.host}:10102", "Upgrade: websocket", "Connection: Upgrade", f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
-            if self.password: headers.append(f"Cookie: airscript={self.password}")
-            sock.sendall(("\r\n".join(headers) + "\r\n\r\n").encode("ascii"))
-            if not self._read_until(sock, b"\r\n\r\n").startswith(b"HTTP/1.1 101"):
-                raise ProtocolError(t("websocket_rejected"))
-            sock.settimeout(0.5)
             while not stop_event or not stop_event.is_set():
-                if deadline is not None and time.monotonic() >= deadline: return
-                try: opcode, payload = self._read_frame(sock)
-                except socket.timeout: continue
-                if opcode == 0x8: return False
-                if opcode == 0x9: self._send_frame(sock, 0xA, payload)
-                elif opcode == 0x1:
-                    try:
-                        event = json.loads(payload.decode("utf-8")); yield LogEntry(str(event.get("msg", "")), str(event.get("type", "o")), str(event.get("time", "")))
-                    except (UnicodeDecodeError, json.JSONDecodeError): yield LogEntry(payload.decode("utf-8", "replace"))
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return True
+                    websocket.settimeout(min(0.5, remaining))
+                try:
+                    message = websocket.receive()
+                except TimeoutError:
+                    continue
+                if message is None:
+                    return websocket.close_code in {None, 1000, 1001}
+                opcode, payload = message
+                if opcode != 0x1:
+                    continue
+                text = payload.decode("utf-8")
+                try:
+                    event = json.loads(text)
+                except json.JSONDecodeError:
+                    event = None
+                if isinstance(event, Mapping):
+                    yield LogEntry(str(event.get("msg", "")), str(event.get("type", "o")), str(event.get("time", "")))
+                else:
+                    yield LogEntry(text)
             return True
         finally:
-            sock.close()
+            websocket.close()
 
     def save_logs(self, destination: str | Path, *, duration: Optional[float] = None, reconnects: int = 0) -> int:
         """Write log events as UTF-8 JSON Lines and return the event count."""
@@ -1314,39 +1343,3 @@ class AScriptClient:
         for entry in self.logs(duration=timeout, reconnects=reconnects):
             if matcher(entry.message): return entry
         return None
-
-    @staticmethod
-    def _read_until(sock: socket.socket, marker: bytes) -> bytes:
-        data = b""
-        while marker not in data:
-            part = sock.recv(4096)
-            if not part: raise ProtocolError("unexpected EOF during WebSocket handshake")
-            data += part
-            if len(data) > 65536: raise ProtocolError("oversized WebSocket handshake")
-        return data
-
-    @staticmethod
-    def _recv_exact(sock: socket.socket, size: int) -> bytes:
-        data = b""
-        while len(data) < size:
-            part = sock.recv(size - len(data))
-            if not part: raise ProtocolError("unexpected EOF during WebSocket frame")
-            data += part
-        return data
-
-    @classmethod
-    def _read_frame(cls, sock: socket.socket) -> tuple[int, bytes]:
-        first, second = cls._recv_exact(sock, 2); opcode, size, masked = first & 0x0F, second & 0x7F, bool(second & 0x80)
-        if size == 126: size = struct.unpack(">H", cls._recv_exact(sock, 2))[0]
-        elif size == 127: size = struct.unpack(">Q", cls._recv_exact(sock, 8))[0]
-        if size > 8 * 1024 * 1024: raise ProtocolError("oversized WebSocket frame")
-        mask, data = (cls._recv_exact(sock, 4) if masked else b""), cls._recv_exact(sock, size)
-        return opcode, bytes(value ^ mask[i % 4] for i, value in enumerate(data)) if mask else data
-
-    @staticmethod
-    def _send_frame(sock: socket.socket, opcode: int, payload: bytes) -> None:
-        mask, size = secrets.token_bytes(4), len(payload)
-        if size < 126: header = bytes([0x80 | opcode, 0x80 | size])
-        elif size < 65536: header = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(">H", size)
-        else: header = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(">Q", size)
-        sock.sendall(header + mask + bytes(value ^ mask[i % 4] for i, value in enumerate(payload)))

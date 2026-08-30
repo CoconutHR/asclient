@@ -7,7 +7,7 @@ from .automation import Device, Selector, UiCollection, UiObject, UiSnapshot, Sn
 from .vision import PixelColor, ScreenFrame
 from .run import Run
 from .tunnel import AScriptTunnel, IProxyTunnel
-from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, IProxyNotFoundError, TunnelError
+from .errors import AScriptError, DeviceConnectionError, DeviceOperationError, DeviceResponseError, IProxyNotFoundError, ProtocolError, TunnelError
 
 try:
     __version__ = _package_version("asclient")
@@ -15,8 +15,8 @@ except PackageNotFoundError:  # running from a source checkout without installat
     __version__ = "0.0.0+unknown"
 
 
-def connect(address: str, *, password: str = "", timeout: float = 15.0, retries: int = 1) -> Device:
+def connect(address: str, *, password: str = "", timeout: float = 15.0, retries: int = 1, lock_id: str | None = None) -> Device:
     """Connect to an AScript device using a uiautomator2-like entry point."""
-    return Device(AScriptClient(address, password=password, timeout=timeout, retries=retries))
+    return Device(AScriptClient(address, password=password, timeout=timeout, retries=retries, lock_id=lock_id))
 
-__all__ = ["AScriptClient", "DeviceAddress", "ImageMatch", "LogEntry", "OcrItem", "OcrResult", "PixelColor", "ScreenFrame", "Device", "Selector", "UiCollection", "UiObject", "UiSnapshot", "SnapshotNode", "SnapshotCollection", "WatchRule", "Watcher", "Run", "AScriptTunnel", "IProxyTunnel", "connect", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError", "TunnelError", "IProxyNotFoundError"]
+__all__ = ["AScriptClient", "DeviceAddress", "ImageMatch", "LogEntry", "OcrItem", "OcrResult", "PixelColor", "ScreenFrame", "Device", "Selector", "UiCollection", "UiObject", "UiSnapshot", "SnapshotNode", "SnapshotCollection", "WatchRule", "Watcher", "Run", "AScriptTunnel", "IProxyTunnel", "connect", "AScriptError", "DeviceConnectionError", "DeviceOperationError", "DeviceResponseError", "ProtocolError", "TunnelError", "IProxyNotFoundError"]

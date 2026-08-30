@@ -891,6 +891,91 @@ class ClientTests(unittest.TestCase):
             Image.new("RGB", (2, 2), "blue").save(path)
             self.assertIsNone(image.find_image(path, confidence=1))
 
+    def test_template_matching_confirms_all_pixels_after_sparse_prefilter(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import ScreenFrame
+        screen = Image.new("RGB", (10, 10), "black")
+        template = Image.new("RGB", (10, 10), "black"); template.putpixel((2, 2), (255, 0, 0))
+        screen_data, template_data = BytesIO(), BytesIO(); screen.save(screen_data, "PNG"); template.save(template_data, "PNG")
+        self.assertIsNone(ScreenFrame(screen_data.getvalue()).find_image(template_data.getvalue(), confidence=.999))
+
+    def test_template_matching_sparse_prefilter_does_not_reject_valid_full_score(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import ScreenFrame
+
+        template = Image.new("RGB", (16, 16), "black")
+        screen = template.copy()
+        screen.putpixel((0, 0), (255, 255, 255))
+        screen_data, template_data = BytesIO(), BytesIO()
+        screen.save(screen_data, "PNG")
+        template.save(template_data, "PNG")
+        match = ScreenFrame(screen_data.getvalue()).find_image(template_data.getvalue(), confidence=0.99)
+        self.assertIsNotNone(match)
+        self.assertGreaterEqual(match.confidence, 0.99)
+
+    def test_template_matching_uses_full_pixel_threshold_and_best_score(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import ScreenFrame
+        template = Image.new("RGB", (2, 2), "black"); template.putpixel((0, 0), (20, 30, 40))
+        screen = Image.new("RGB", (6, 2), "black"); near = template.copy(); near.putpixel((1, 1), (60, 30, 40)); screen.paste(near, (0, 0)); screen.paste(template, (4, 0))
+        screen_data, template_data = BytesIO(), BytesIO(); screen.save(screen_data, "PNG"); template.save(template_data, "PNG")
+        frame = ScreenFrame(screen_data.getvalue())
+        self.assertEqual((frame.find_image(template_data.getvalue(), confidence=.99).x, frame.find_image(template_data.getvalue(), confidence=.99).y), (4, 0))
+        self.assertIsNone(frame.find_image(template_data.getvalue(), confidence=1, region=(0, 0, 2, 2)))
+
+    def test_template_matching_keeps_scan_order_for_equal_scores(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import ScreenFrame
+        template = Image.new("RGB", (2, 2), (20, 30, 40))
+        screen = Image.new("RGB", (8, 2), "black"); screen.paste(template, (1, 0)); screen.paste(template, (5, 0))
+        screen_data, template_data = BytesIO(), BytesIO(); screen.save(screen_data, "PNG"); template.save(template_data, "PNG")
+        match = ScreenFrame(screen_data.getvalue()).find_image(template_data.getvalue(), confidence=1)
+        self.assertEqual((match.x, match.y), (1, 0))
+        frame = ScreenFrame(screen_data.getvalue())
+        self.assertEqual((frame.find_image(template_data.getvalue(), confidence=1, region=(0, 0, 3, 2)).x, 0), (1, 0))
+        self.assertIsNone(frame.find_image(template_data.getvalue(), confidence=1, region=(2, 0, 5, 2)))
+
+    def test_template_matching_ignores_alpha_and_cache_is_thread_safe(self):
+        from io import BytesIO
+        from PIL import Image
+        from asclient import ScreenFrame
+        from asclient import vision
+        screen = Image.new("RGBA", (4, 4), (0, 0, 0, 255)); screen.paste(Image.new("RGBA", (2, 2), (12, 34, 56, 255)), (1, 1))
+        template = Image.new("RGBA", (2, 2), (12, 34, 56, 0)); screen_data, template_data = BytesIO(), BytesIO(); screen.save(screen_data, "PNG"); template.save(template_data, "PNG")
+        match = ScreenFrame(screen_data.getvalue()).find_image(template_data.getvalue(), confidence=1)
+        self.assertEqual((match.x, match.y), (1, 1))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "template.png"; template.save(path)
+            with vision._TEMPLATE_CACHE_LOCK: vision._TEMPLATE_CACHE.clear()
+            errors = []
+            def find():
+                try: ScreenFrame(screen_data.getvalue()).find_image(path, confidence=1)
+                except Exception as exc: errors.append(exc)
+            threads = [threading.Thread(target=find) for _ in range(12)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join()
+            self.assertEqual(errors, [])
+            with vision._TEMPLATE_CACHE_LOCK:
+                self.assertEqual(len(vision._TEMPLATE_CACHE), 1)
+                self.assertTrue(next(iter(vision._TEMPLATE_CACHE.values())).samples)
+
+    def test_find_any_image_stops_after_first_match(self):
+        calls = []
+        class Frame:
+            def find_image(self, template, **kwargs):
+                calls.append(template)
+                return object() if template == "first" else None
+        original = self.client.capture_frame; self.client.capture_frame = lambda: Frame()
+        try:
+            self.assertEqual(self.client.find_any_image({"one": "first", "two": "second"})[0], "one")
+        finally:
+            self.client.capture_frame = original
+        self.assertEqual(calls, ["first"])
+
     def test_wait_any_image_returns_matching_name(self):
         from io import BytesIO
         from PIL import Image
@@ -1111,6 +1196,43 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(watcher.errors, [])
         finally:
             self.client.ui_tree, self.client.tap = original_tree, original_tap
+
+    def test_ocr_text_matching_calls_ocr_once_per_query(self):
+        from asclient import OcrItem, OcrResult
+
+        calls = []
+        original = self.client.ocr
+        self.client.ocr = lambda **kwargs: calls.append(kwargs) or OcrResult((OcrItem("Sign in", None, None, {}), OcrItem("Sign", None, None, {})), {})
+        try:
+            self.assertEqual([item.text for item in self.client.find_ocr_text("Sign")], ["Sign in", "Sign"])
+            self.assertEqual([item.text for item in self.client.find_ocr_text("Sign", contains=False)], ["Sign"])
+        finally:
+            self.client.ocr = original
+        self.assertEqual(len(calls), 2)
+
+    def test_logs_zero_duration_does_not_connect_and_non_object_json_is_raw_text(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.messages = [(0x1, b"[]"), None]
+                self.closed = False
+                self.close_code = 1000
+
+            def settimeout(self, timeout):
+                pass
+
+            def receive(self):
+                return self.messages.pop(0)
+
+            def close(self):
+                self.closed = True
+
+        websocket = FakeWebSocket()
+        with patch("asclient.client.WebSocket.connect", return_value=websocket) as connect_socket:
+            self.assertEqual(list(self.client.logs(duration=0)), [])
+            connect_socket.assert_not_called()
+            entries = list(self.client.logs())
+        self.assertEqual([entry.message for entry in entries], ["[]"])
+        self.assertTrue(websocket.closed)
 
     def test_inspector_ignores_a_closed_browser_socket(self):
         from asclient.inspector import serve
