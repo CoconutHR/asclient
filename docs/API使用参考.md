@@ -209,6 +209,80 @@ client.yolov_free()
 | `yolov_free()` | 释放模型 |
 | `yolov_nc() -> int` | 已加载模型的类别数（未加载为 0） |
 
+#### 快速训练一份自己的模型（从零到设备推理）
+
+全流程在**电脑**上完成，手机只负责最终推理。以检测“某个会变形/移动的按钮”为例：
+
+**第 1 步：采集样本（用 asclient 批量截图，天然同域）。**
+目标在真实 App 里的样子，就是最好的训练数据。挂机采集 100~300 张覆盖不同状态的截图：
+
+```python
+from asclient import connect
+import time, pathlib
+
+d = connect("192.168.3.17:9096")
+out = pathlib.Path("dataset/images/all")
+out.mkdir(parents=True, exist_ok=True)
+for i in range(200):
+    d.screenshot(out / f"img_{i:03d}.png")
+    time.sleep(2)          # 期间手动改变目标状态：翻页/点亮/不同场景
+```
+
+**第 2 步：标注（YOLO 格式）。**
+用 [X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling)、labelImg 或 Roboflow 画框，导出 **YOLO txt 格式**（每张图一个同名 `.txt`，每行 `class_id cx cy w h`，坐标为 0~1 归一化值）。整理成标准目录：
+
+```text
+dataset/
+  images/train   images/val      # 按 ~9:1 拆分
+  labels/train   labels/val
+  data.yaml
+```
+
+`data.yaml`：
+
+```yaml
+train: images/train
+val: images/val
+names:
+  0: target_button
+  1: enemy
+```
+
+**第 3 步：训练（小模型 + 少轮数就能用）。**
+
+```bash
+py -m pip install ultralytics
+yolo detect train model=yolo11n.pt data=dataset/data.yaml epochs=80 imgsz=640
+```
+
+`yolo11n` 是最小档，几百张图在 CPU 上也能训完；有权重文件的类别越简单、样本越规整，所需样本越少。产物在 `runs/detect/train/weights/best.pt`。
+
+**第 4 步：转 ncnn 格式。**
+
+```bash
+yolo export model=runs/detect/train/weights/best.pt format=ncnn
+```
+
+得到 `best_ncnn_model/` 目录，里面的 `.param` 与 `.bin` 就是设备端需要的两个文件。
+
+**第 5 步：上传设备并推理。**
+
+```python
+from asclient import connect
+
+d = connect("192.168.3.17:9096")
+c = d.client
+c.upload_file("models", "best_ncnn_model/xxx.param", "yolo.param")   # → ~/modules/models/yolo.param
+c.upload_file("models", "best_ncnn_model/xxx.bin", "yolo.bin")
+c.upload_file("models", "data.yaml", "data.yaml")
+
+assert c.yolov_load("~/modules/models/yolo.param", "~/modules/models/yolo.bin", "~/modules/models/data.yaml")
+detections = c.yolov_detect(threshold=0.5)
+print(detections)
+```
+
+**实践建议**：先用 50 张图 + 30 轮跑通全流程再迭代质量；推理 `threshold` 从 0.4 起调；目标在屏幕上位置固定时优先考虑模板匹配/`find_sift`（零训练成本），需要“识别一类”再上 YOLO。
+
 ```python
 client.app_start("com.example.game")
 client.wait(client.selector().name("start_button"), timeout=10).click()
