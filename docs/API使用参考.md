@@ -213,8 +213,9 @@ client.yolov_free()
 
 全流程在**电脑**上完成，手机只负责最终推理。以检测“某个会变形/移动的按钮”为例：
 
-**第 1 步：采集样本（用 asclient 批量截图，天然同域）。**
-目标在真实 App 里的样子，就是最好的训练数据。挂机采集 100~300 张覆盖不同状态的截图：
+**第 1 步：采集样本——选什么样的图、怎么采。**
+
+训练数据 = "手机真实屏幕截图"，直接用 asclient 批量采集（分辨率、渲染与推理时完全一致，天然高质量）。先把手机操作到目标出现的场景，再在电脑上运行：
 
 ```python
 from asclient import connect
@@ -225,20 +226,72 @@ out = pathlib.Path("dataset/images/all")
 out.mkdir(parents=True, exist_ok=True)
 for i in range(200):
     d.screenshot(out / f"img_{i:03d}.png")
-    time.sleep(2)          # 期间手动改变目标状态：翻页/点亮/不同场景
+    time.sleep(2)          # ★ 每张截图的间隔里，手动改变一次画面再让它拍
 ```
 
-**第 2 步：标注（YOLO 格式）。**
-用 [X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling)、labelImg 或 Roboflow 画框，导出 **YOLO txt 格式**（每张图一个同名 `.txt`，每行 `class_id cx cy w h`，坐标为 0~1 归一化值）。整理成标准目录：
+**选什么样的图（比数量更重要）**：
+
+- **覆盖目标的所有"状态"**：按钮的点亮/置灰、角色的不同朝向/装备、图标的选中/未选中——每种状态至少二三十张，否则模型只认识你拍过的那一种；
+- **覆盖不同背景和场景**：同一个按钮出现在不同页面、不同滚动位置、不同弹窗之上都要有；背景单一会让模型"以为"背景也是目标的一部分；
+- **目标位置打乱**：别让目标永远居中——手动滚动页面、换 tab，让目标出现在屏幕各处；
+- **包含真实干扰**：弹窗、红点、 loading 遮罩盖住目标一部分的图也要留一些（实际运行时就是会碰到）；
+- **要少量"负样本"**：拍 10%~20% 目标完全不存在的纯背景图，能显著降低误检。
+
+**避免这些坑**：
+
+- 不要用网图、模拟器截图或别人设备的截图凑数——训练数据和实际推理画面不一致是翻车第一原因；
+- 不要大量复制几乎一样的图（对模型没有新信息）；
+- 极度模糊、目标完全看不见的图直接删掉。
+
+数量参考：每个类别 **100~300 张**起步；只检测一种简单目标时 50 张也能先跑通流程。
+
+**第 2 步：标注（手把手，用 labelImg 离线完成）。**
+
+1. 电脑上安装标注工具（需先装好 Python）：
+
+   ```bash
+   py -m pip install labelImg
+   ```
+
+2. 启动：命令行输入 `labelImg` 回车，会打开一个窗口。
+3. **打开图片目录**：点左侧 "Open Dir"，选择 `dataset\images\all`。
+4. **设置标注保存目录**：点左侧 "Change Save Dir"，新建并选择 `dataset\labels\all`。
+5. **切换格式为 YOLO**：点左侧工具栏的 "PascalVOC" 按钮，让它变成 "YOLO"（默认是 VOC，必须切！）。
+6. **逐张画框**：
+   - 按快捷键 `W`，在目标上拖出一个**紧贴目标边缘**的矩形框（别留大片背景），弹出类别名输入框后填写类别（如 `target_button`）；
+   - 一张图里有多个目标就画多个框；一张图里**没有任何目标**也要按 `Ctrl+S` 保存——会生成一个空的 `.txt`，这是告诉模型"这张图里什么都没有"的背景样本；
+   - 按 `D` 切换下一张，重复直到全部标完。
+7. **记住类别顺序**：第一次保存时 labelImg 会在标注目录生成 `classes.txt`，里面的类别**顺序就是编号顺序**（第一行=0，第二行=1……）。下一步的 `data.yaml` 必须用一模一样的顺序。
+
+标完后每个 `.png` 旁边都有一个同名 `.txt`。然后把数据集按约 9:1 随机拆成训练/验证两份，把下面脚本存为 `split_dataset.py`（与 `dataset` 目录同级）并运行 `py split_dataset.py`：
+
+```python
+import random, shutil, pathlib
+
+random.seed(0)
+root = pathlib.Path("dataset")
+imgs = [p for p in (root / "images" / "all").iterdir() if p.suffix.lower() == ".png"]
+random.shuffle(imgs)
+val_n = max(1, len(imgs) // 10)
+for split, files in (("val", imgs[:val_n]), ("train", imgs[val_n:])):
+    (root / "images" / split).mkdir(parents=True, exist_ok=True)
+    (root / "labels" / split).mkdir(parents=True, exist_ok=True)
+    for img in files:
+        shutil.copy(img, root / "images" / split / img.name)
+        txt = root / "labels" / "all" / (img.stem + ".txt")
+        if txt.exists(): shutil.copy(txt, root / "labels" / split / txt.name)
+        else: (root / "labels" / split / (img.stem + ".txt")).write_text("", encoding="utf-8")
+print("done:", len(imgs), "images")
+```
+
+整理完成后目录长这样，并写好 `data.yaml`（**names 的顺序=classes.txt 的顺序**）：
 
 ```text
 dataset/
-  images/train   images/val      # 按 ~9:1 拆分
+  images/train   images/val
   labels/train   labels/val
   data.yaml
 ```
-
-`data.yaml`：
 
 ```yaml
 train: images/train
@@ -247,6 +300,8 @@ names:
   0: target_button
   1: enemy
 ```
+
+备选：[Roboflow](https://roboflow.com) 网页版可在浏览器里标注并自动完成拆分与 `data.yaml`（注意截图会上传到第三方云）；[X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling) 支持模型预标注。本教程以离线的 labelImg 为准。
 
 **第 3 步：训练（小模型 + 少轮数就能用）。**
 
