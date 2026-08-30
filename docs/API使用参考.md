@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应 ASClient `0.8.2`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应 ASClient `0.8.3`。除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -186,6 +186,28 @@ assert app["bundle_id"] == "com.example.app"
 | `notify(msg, title=None, notification_id="9096")` | 发送系统通知（脚本完成/告警提醒） |
 | `find_sift(templates, *, threshold=0.5, rgb=False, max_res=0, region=None, region_relative=None)` | SIFT 特征匹配（设备端原生 OpenCV），抗尺度/光照变化；`templates` 为**设备端**小图路径列表，结果坐标为截图像素并已叠加 region 偏移 |
 | `scan_code(*, region=None, region_relative=None)` | 二维码/条码识别（设备端原生 MLKitx），返回值/类型/矩形/中心 |
+
+### YOLO 目标检测（ncnn）
+
+设备端内置 ncnn 推理引擎（支持 YOLOv8/v11）。检测"一类"目标而非固定图片，对缩放/形变/光照鲁棒，推理在手机本地毫秒级完成。
+
+**前提**：你需要自备训练好的 ncnn 模型（ultralytics 训练 → 转 ncnn 得到 `.param`+`.bin`，可选 `data.yaml` 类别名），用 `push` 上传到设备。
+
+```python
+client.yolov_load("~/m/watermark.param", "~/m/watermark.bin", "~/m/data.yaml", use_gpu=False)
+detections = client.yolov_detect(threshold=0.5)                       # 自动截屏推理
+detections = client.yolov_detect(region_relative=(0.2, 0.2, 0.8, 0.8))  # 只检测区域（坐标已加回偏移）
+for det in detections:
+    print(det["tag"], det["confidence"], det["rect"])
+client.yolov_free()
+```
+
+| 方法 | 说明 |
+| --- | --- |
+| `yolov_load(param_path, bin_path, yaml_path=None, *, use_gpu=False) -> bool` | 加载模型（路径为设备端路径）；成功后可反复 detect |
+| `yolov_detect(*, target_size=640, threshold=0.4, nms_threshold=0.5, region=None, region_relative=None)` | 自动截屏推理，返回 `[{"class_id", "confidence", "rect": [l,t,r,b], "tag"}]`；未加载模型时返回空列表 |
+| `yolov_free()` | 释放模型 |
+| `yolov_nc() -> int` | 已加载模型的类别数（未加载为 0） |
 
 ```python
 client.app_start("com.example.game")

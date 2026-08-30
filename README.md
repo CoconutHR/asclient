@@ -80,6 +80,7 @@ device(text="登录").click()             # 确认无误后再点击
 | 拟人抖动点击 | `client.tap(600, 1300, jitter=5)` |
 | SIFT 特征匹配 | `client.find_sift(["~/res/img/x.png"], threshold=0.7)` |
 | 二维码/条码识别 | `client.scan_code()` |
+| YOLO 目标检测 | `client.yolov_load(p, b, yaml)` → `client.yolov_detect(threshold=0.5)` |
 | 设备端整帧缓存 | `client.screen_cache(True)`（批量找色/OCR 前开） |
 | 系统通知 | `client.notify("跑完了", title="asclient")` |
 | 元素内滚动 / 滚动查找 | `element.scroll("down", 0.8)` / `element.scroll_to(device.selector().name("目标"))` |

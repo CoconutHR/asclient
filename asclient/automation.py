@@ -454,6 +454,10 @@ class Device:
     def notify(self, msg: str, title: str | None = None, *, notification_id: str = "9096") -> Any: return self.client.notify(msg, title, notification_id=notification_id)
     def find_sift(self, templates: Any, **kwargs: Any) -> Any: return self.client.find_sift(templates, **kwargs)
     def scan_code(self, **kwargs: Any) -> Any: return self.client.scan_code(**kwargs)
+    def yolov_load(self, param_path: str, bin_path: str, yaml_path: str | None = None, *, use_gpu: bool = False) -> Any: return self.client.yolov_load(param_path, bin_path, yaml_path, use_gpu=use_gpu)
+    def yolov_detect(self, **kwargs: Any) -> Any: return self.client.yolov_detect(**kwargs)
+    def yolov_free(self) -> Any: return self.client.yolov_free()
+    def yolov_nc(self) -> Any: return self.client.yolov_nc()
     def click_if_unique(self, selector: Selector, *, timeout: float = 0, interval: float = 0.3, duration: float | None = None, duration_ms: int | None = None) -> UiObject:
         deadline = time.monotonic() + timeout
         with self.client.locked():

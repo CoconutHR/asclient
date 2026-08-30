@@ -804,6 +804,48 @@ class AScriptClient:
         value = self.eval_python(code)
         return value if isinstance(value, list) else []
 
+    def yolov_load(self, param_path: str, bin_path: str, yaml_path: str | None = None, *, use_gpu: bool = False) -> bool:
+        """加载 YOLOv8/v11 ncnn 模型（加载一次后可反复 ``yolov_detect``）。
+
+        三个路径均为**设备端**路径（``.param``/``.bin`` 为 ncnn 权重，``yaml_path``
+        可选，用于解析类别名）。返回加载是否成功。
+        """
+        if not param_path or not bin_path: raise ValueError("param_path and bin_path are required device-side paths")
+        code = (
+            "from ascript.ios.screen import yolov11\n"
+            "_result = bool(yolov11.load(%r, %r, %r, use_gpu=%r))\n" % (str(param_path), str(bin_path), str(yaml_path) if yaml_path else None, bool(use_gpu))
+        )
+        return bool(self.eval_python(code))
+
+    def yolov_detect(self, *, target_size: int = 640, threshold: float = 0.4, nms_threshold: float = 0.5, region: Any = None, region_relative: Any = None) -> list[dict[str, Any]]:
+        """YOLO 目标检测：自动截取当前屏幕（或 ``region``/``region_relative`` 区域）推理。
+
+        返回 ``[{"class_id", "confidence", "rect": [l, t, r, b], "tag"}]``，坐标为
+        截图像素（区域检测结果已自动加回偏移）。``tag`` 来自加载时 yaml 的类别名。
+        需先 ``yolov_load``。
+        """
+        if not 0 < float(threshold) <= 1: raise ValueError("threshold must be within (0, 1]")
+        if not 0 <= float(nms_threshold) <= 1: raise ValueError("nms_threshold must be within 0..1")
+        rect = "None"
+        if region is not None or region_relative is not None:
+            left, top, right, bottom = self._resolve_capture_region(region, region_relative)
+            rect = json.dumps([left, top, right, bottom])
+        code = (
+            "import json\n"
+            "from ascript.ios.screen import yolov11\n"
+            "_result = json.dumps(yolov11.detect(target_size=%d, threshold=%r, nms_threshold=%r, rect=%s))\n" % (int(target_size), float(threshold), float(nms_threshold), rect)
+        )
+        value = self.eval_python(code)
+        return value if isinstance(value, list) else []
+
+    def yolov_free(self) -> None:
+        """释放已加载的 YOLO 模型。"""
+        with self.locked(): self.eval_python("from ascript.ios.screen import yolov11\nyolov11.free()\n_result=True")
+
+    def yolov_nc(self) -> int:
+        """返回已加载模型的类别数；未加载时为 0。"""
+        return int(self.eval_python("from ascript.ios.screen import yolov11\n_result=int(yolov11.nc())"))
+
     def eval_python(self, code: str, *, image: str = "") -> Any:
         if not code.strip():
             raise ValueError("code is empty")

@@ -439,6 +439,36 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.client.find_sift(["a.png"], threshold=2)
         with self.assertRaises(ValueError): self.client.scan_code(region=(0, 0, 1, 1), region_relative=(0, 0, 1, 1))
 
+    def test_yolov_lifecycle_encodes_and_validates(self):
+        captured: list[str] = []
+        original_eval, original_size = self.client.eval_python, self.client.action_size
+        def fake_eval(code):
+            captured.append(code)
+            if "yolov11.load" in code: return True
+            if "yolov11.detect" in code: return [{"class_id": 0, "confidence": 0.9, "rect": [1, 2, 3, 4], "tag": "enemy"}]
+            if "yolov11.nc" in code: return 80
+            return None
+        self.client.eval_python = fake_eval
+        self.client.action_size = lambda: {"width": 1000.0, "height": 2000.0}
+        try:
+            self.assertTrue(self.client.yolov_load("~/m/yolo.param", "~/m/yolo.bin", "~/m/data.yaml", use_gpu=True))
+            detections = self.client.yolov_detect(threshold=0.5, region_relative=(0.1, 0.2, 0.5, 0.6))
+            self.client.yolov_free()
+            self.assertEqual(self.client.yolov_nc(), 80)
+            self.client.yolov_detect()
+        finally:
+            self.client.eval_python, self.client.action_size = original_eval, original_size
+        joined = "\n".join(captured)
+        self.assertIn("yolov11.load('~/m/yolo.param', '~/m/yolo.bin', '~/m/data.yaml', use_gpu=True)", joined)
+        self.assertIn("detect(target_size=640, threshold=0.5, nms_threshold=0.5, rect=[100, 400, 500, 1200])", joined)
+        self.assertIn("yolov11.free()", joined)
+        self.assertIn("int(yolov11.nc())", joined)
+        self.assertIn("rect=None", joined)
+        self.assertEqual(detections[0]["tag"], "enemy")
+        with self.assertRaises(ValueError): self.client.yolov_detect(threshold=2)
+        with self.assertRaises(ValueError): self.client.yolov_detect(nms_threshold=-1)
+        with self.assertRaises(ValueError): self.client.yolov_load("", "~/m/yolo.bin")
+
     def test_eval_actions_are_encoded(self):
         self.client.input_text("a'\n中文")
         call = next(call for call in Handler.calls if call[1] == "/api/gp/eval")
