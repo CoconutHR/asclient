@@ -129,7 +129,7 @@ py -m asclient doctor
 - `device.password`：设备服务密码；留空表示不发送密码 Cookie。
 - `tunnel`：USB `iproxy` 的可执行文件、UDID 和端口配置。
 
-单次命令可使用 `--device`、`--password`、`--timeout` 与 `--lang` 覆盖配置文件。
+单次命令可使用 `--device`、`--password`、`--timeout` 与 `--lang` 覆盖配置文件。这些都是全局参数，必须写在子命令之前（例如 `py -m asclient --device 127.0.0.1:9096 status`）；只有 `--yes` 允许写在子命令之后。优先级统一为“命令行参数 > 配置文件 > 内置默认值”。
 
 ## 快速诊断与 USB 连接
 
@@ -149,6 +149,8 @@ py -m asclient status
 py -m asclient log 10
 py -m asclient inspect
 ```
+
+USB 场景下 `device.address` 必须是 `127.0.0.1:9096`。端口冲突时可用 `tunnel --local-port` / `--local-log-port` 改用其他本地端口，但 `tunnel` 不会自动改写配置，业务命令需同步用 `--device 127.0.0.1:<新端口>` 指向新端口；多设备并行时再用 `--udid` 固定目标手机。隧道的本机监听地址只能是回环地址，不提供绑定到局域网网卡的选项。完整参数表见 [USB 隧道运维指南](docs/USB隧道运维指南.md)。
 
 若已安装 `iproxy.exe` 但未加入 `PATH`，可执行 `py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"`；工具会显示修改计划，并在确认后才写入本地配置。
 
@@ -221,7 +223,26 @@ with Run(device) as run:
 
 `py -m asclient inspect` 会启动仅监听本机回环地址的浏览器 Inspector。界面全部使用中文，展示当前截图、控件树、前台 App、控件属性、可复制选择器和真机坐标。拖动三栏分隔线不会影响截图比例或点击坐标映射。
 
-顶部的“裁剪保存”可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。
+这里有两个不同的地址，不要混淆：
+
+| 我要改的 | 参数 | 默认值 |
+| --- | --- | --- |
+| 连接哪台手机 | 全局 `--device HOST[:PORT]`，或配置文件 `device.address` | `192.168.3.17:9096` |
+| Inspector 自己监听在哪 | `inspect --host HOST` | `127.0.0.1` |
+| Inspector 监听端口 | `inspect --port PORT`（`0` 表示随机端口） | `0` |
+| 不自动打开浏览器 | `inspect --no-browser` | 自动打开 |
+
+`--device` 是全局参数，必须写在子命令之前；`--host` 属于 `inspect` 子命令，写在其后：
+
+```bat
+py -m asclient --device 192.168.3.25:9096 inspect --port 8765
+```
+
+USB 场景下设备地址应为 `127.0.0.1:9096`（先在另一个终端运行 `tunnel`）。启动后终端会打印实际 URL，随机端口时必须从这一行获取端口号。
+
+顶部的“裁剪保存”可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。CLI 不提供修改该目录的参数；需要指定目录时使用 Python `serve(client, output_dir=...)`。
+
+**不要使用 `--host 0.0.0.0`。** Inspector 的 `/api/*` 接口没有任何鉴权，能读取设备截图与控件树；绑定到非回环地址等于把手机屏幕内容暴露给同网段所有主机。该参数仅为特殊调试场景保留，生产与日常使用应保持默认的 `127.0.0.1`。
 
 部分 App 或页面不暴露无障碍控件树，此时 Inspector 会正确显示没有语义节点。仍可单独使用截图、OCR、图色与坐标操作；不要假设所有页面都能使用语义选择器。
 

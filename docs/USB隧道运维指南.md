@@ -98,6 +98,8 @@ USB 使用时将 `device.address` 设为本机回环地址：
 
 `udid` 留空时由 `iproxy` 选择其默认设备。多设备环境必须填写 UDID，避免把测试命令转发到错误手机。`asclient.json` 已被 Git 忽略，不得提交密码、UDID 或内网信息。
 
+配置项对应关系：`device.address` 的主机与端口必须与 `tunnel.local_host`、`tunnel.local_port` 一致，否则命令会连到未被转发的地址。`local_host` 只允许 `127.0.0.1` 或 `localhost`；`startup_timeout` 是等待 `iproxy` 就绪的秒数，USB 链路较慢或设备较多时可适当增大。
+
 ## CLI 使用
 
 本节命令沿用 `py -m asclient` 的 Windows 写法；macOS/Linux 替换为 `python3 -m asclient`，`Scripts` 目录已加入 `PATH` 时可直接用 `asc`。三种形式的完整说明见 [API 使用参考](API使用参考.md)的“CLI 参考 → 调用方式”。
@@ -130,10 +132,37 @@ py -m asclient shot artifacts\usb-screen.png
 py -m asclient inspect
 ```
 
+USB 场景下 `inspect` 的两个地址都是回环地址，但含义不同：设备地址 `127.0.0.1:9096` 经 `iproxy` 转发到手机，Inspector 自身监听的 `127.0.0.1:<随机端口>` 是给本机浏览器访问的网页服务。前者由 `--device` 或配置文件指定，后者由 `inspect --host` / `--port` 指定，两者不要互相填错。
+
 临时覆盖配置：
 
 ```bat
 py -m asclient tunnel --local-port 19096 --remote-port 9096 --local-log-port 11002 --remote-log-port 10102 --udid <UDID>
+py -m asclient --device 127.0.0.1:19096 status
+```
+
+这两条命令必须成对理解：`tunnel` 只负责建立端口映射，它**不会**同步修改 `device.address`。改了 `--local-port` 之后，所有业务命令都必须用全局 `--device 127.0.0.1:<新端口>` 指向新的本地端口，否则仍会连到配置文件里的旧地址。
+
+`tunnel` 可覆盖的参数与对应配置键如下（优先级为“命令行 > 配置文件 > 内置默认值”）：
+
+| 参数 | 配置键 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `--local-port` | `tunnel.local_port` | `9096` | 本机控制端口，`device.address` 需与之一致 |
+| `--remote-port` | `tunnel.remote_port` | `9096` | 手机端 AScript HTTP 端口 |
+| `--local-log-port` | `tunnel.local_log_port` | `10102` | 本机日志端口 |
+| `--remote-log-port` | `tunnel.remote_log_port` | `10102` | 手机端日志端口 |
+| `--no-logs` | `tunnel.forward_logs`（取反） | 转发日志 | 只映射控制端口 |
+| `--udid` | `tunnel.udid` | 空（由 `iproxy` 选默认设备） | 多设备时指定目标手机 |
+| `--iproxy` | `tunnel.iproxy` | `iproxy` | `iproxy` 可执行文件名或绝对路径 |
+
+**本机监听地址不可通过 CLI 修改。** `tunnel.local_host` 只接受 `127.0.0.1` 或 `localhost`，填入其他值会在启动前抛出 `local_host must be loopback for a USB tunnel`；这是有意的设计，参见下文“安全边界”。因此 USB 场景下 `device.address` 的主机部分只能是回环地址，需要变动的只有端口。
+
+多设备并行时，为每台手机分配互不冲突的本地端口，并各自固定 UDID：
+
+```bat
+py -m asclient tunnel --udid <UDID-A> --local-port 9096  --local-log-port 10102
+py -m asclient tunnel --udid <UDID-B> --local-port 19096 --local-log-port 11002
+py -m asclient --device 127.0.0.1:9096  status
 py -m asclient --device 127.0.0.1:19096 status
 ```
 

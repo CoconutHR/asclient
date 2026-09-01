@@ -1055,8 +1055,18 @@ py -m asclient --yes --device 192.168.3.17:9096 api GET /api/node/dump --params 
 默认从当前目录的 `asclient.json` 读取连接配置。可复制根目录的 `asclient.example.json` 后填写设备信息；命令行参数只用于单次覆盖。所有命令共用：
 
 ```bat
-py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--timeout SECONDS] <command>
+py -m asclient [--config FILE] [--device HOST:PORT] [--password PASSWORD] [--timeout SECONDS] [--lang auto|zh-CN|en] <command>
 ```
+
+| 全局参数 | 覆盖的配置键 | 默认值 |
+| --- | --- | --- |
+| `--config FILE` | — | 当前目录的 `asclient.json`（不存在时使用内置默认值） |
+| `--device HOST[:PORT]` | `device.address` | `192.168.3.17:9096`；省略端口时按 `9096` 处理 |
+| `--password PASSWORD` | `device.password` | 空字符串（不发送密码 Cookie） |
+| `--timeout SECONDS` | `device.timeout` | `15.0` |
+| `--lang auto\|zh-CN\|en` | `language` | `auto`（跟随操作系统语言） |
+
+这些全局参数必须写在子命令之前，例如 `py -m asclient --device 127.0.0.1:9096 inspect`；写在子命令之后会被 `argparse` 判为无效参数。唯一的例外是 `--yes`，它在两个位置等价。子命令自己的参数（如 `inspect --host`、`tunnel --local-port`）必须写在子命令之后。
 
 任何改变设备状态的命令必须显式加 `--yes`，可写在命令前或命令后。这是非交互式确认，便于脚本审计：
 
@@ -1078,15 +1088,27 @@ py -m asclient remove smoke --yes
 | `shot` | `shot [output.png] [--crop-rel LEFT TOP RIGHT BOTTOM]` | 保存截图，可按比例裁剪 |
 | `dump` | `dump [output.xml] [--mode MODE]` | 保存 XML 控件树 |
 | `observe` | `observe [--prefix PREFIX]` | 同时保存截图与 XML |
-| `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector |
-| `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]` | 以前台方式同时管理 HTTP 与日志 USB `iproxy` 隧道；`--no-logs` 仅映射 HTTP |
+| `inspect` | `inspect [--host HOST] [--port PORT] [--no-browser]` | 启动本机 Inspector；`--host` 默认 `127.0.0.1`（不应修改），`--port` 默认 `0` 随机端口 |
+| `tunnel` | `tunnel [--local-port PORT] [--remote-port PORT] [--local-log-port PORT] [--remote-log-port PORT] [--no-logs] [--udid UDID] [--iproxy PATH]` | 以前台方式同时管理 HTTP 与日志 USB `iproxy` 隧道；`--no-logs` 仅映射 HTTP。改动本地端口后业务命令需同步用 `--device` 指向新端口 |
+| `app-start` | `--yes app-start BUNDLE_ID` | 启动 App 并等待进入前台 |
+| `app-stop` | `--yes app-stop BUNDLE_ID` | 停止 App（等价于上划杀掉） |
+| `app-state` | `app-state BUNDLE_ID` | 查询 App 运行状态；`background` 不可判定，详见设备端限制说明 |
+| `lock` / `unlock` | `--yes lock` / `--yes unlock` | 锁屏 / 解锁（仅无密码设备） |
+| `clipboard` | `clipboard` / `--yes clipboard TEXT` | 不带参数为读取；传入 `TEXT` 为写入，写入需 `--yes` |
+| `orientation` | `orientation` | 只读当前屏幕方向（`portrait` / `landscape`） |
+| `openurl` | `--yes openurl URL` | 通过系统打开 URL 或 App 深链 |
+| `key` | `--yes key {home,volume_up,volume_down,power,power_plus_home,snapshot}` | 发送按键事件 |
+| `notification` | `--yes notification` | 下拉打开通知中心 |
+| `device-info` | `device-info` | 只读设备信息（model / name / uuid / locale 等） |
+| `battery` | `battery` | 只读电池信息（`level`、`state`） |
+| `mv` | `--yes mv REMOTE_PATH NEW_NAME` | 同目录内重命名设备端文件或目录；`NEW_NAME` 不能含路径分隔符 |
 | `tap` | `--yes tap X Y [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 坐标点击；旧 `--duration` 保持毫秒兼容 |
 | `tap-rel` | `--yes tap-rel X_RATIO Y_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 按屏幕宽高比例点击 |
 | `swipe` | `--yes swipe X1 Y1 X2 Y2 [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 坐标滑动 |
 | `swipe-rel` | `--yes swipe-rel X1_RATIO Y1_RATIO X2_RATIO Y2_RATIO [--duration MS | --duration-ms MS | --duration-s SECONDS]` | 按屏幕宽高比例滑动 |
 | `input` | `--yes input TEXT [--interval MS]` | 输入文本 |
 | `home` | `--yes home` | Home 动作 |
-| `ocr` | `ocr [rect]` | OCR |
+| `ocr` | `ocr ["LEFT|TOP|RIGHT|BOTTOM"]` | OCR；可选区域为竖线分隔的物理像素整数，省略则识别全屏 |
 | `findcolor` | `findcolor COLORS [--diff FLOAT]` | 查找颜色 |
 | `compare` | `compare COLORS [--diff FLOAT]` | 比对颜色 |
 | `ls` | `ls` | 列项目 |
@@ -1103,7 +1125,9 @@ py -m asclient remove smoke --yes
 | `eval` | `--yes eval CODE` | 执行受信任设备端 Python |
 | `api` | `--yes api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
 
-`remove`、`run`、`stop`、`deploy`、`push`、`eval`、`tap`、`swipe`、`input`、`home` 和原始 `api` 都要求 `--yes`，因为 AScript 的原始 GET 路由也可能改变状态。将它们放在明确的运维或测试步骤中，避免作为排错时的随手命令。
+要求 `--yes` 的完整清单为：`create`、`rename`、`remove`、`push`、`run`、`stop`、`deploy`、`eval`、`mv`、`api`、`tap`、`tap-rel`、`swipe`、`swipe-rel`、`input`、`home`、`app-start`、`app-stop`、`lock`、`unlock`、`openurl`、`key`、`notification`，以及带 `TEXT` 参数的 `clipboard`（写入）。之所以连原始 `api` 也要求确认，是因为 AScript 的原始 GET 路由同样可能改变状态。其余命令（`ping`、`status`、`shot`、`dump`、`observe`、`inspect`、`tunnel`、`ocr`、`findcolor`、`compare`、`ls`、`files`、`pull`、`log`、`cat`、`app`、`app-state`、`orientation`、`device-info`、`battery`、`pkgs`、`doctor`、`help`）为只读，不需要确认。将变更类命令放在明确的运维或测试步骤中，避免作为排错时的随手命令。
+
+时长参数补充说明：`--duration`、`--duration-ms`、`--duration-s` 三者互斥，同时给出会被 `argparse` 拒绝。`--duration-ms` 与 `--duration-s` 各自还接受下划线别名 `--duration_ms` / `--duration_s`，行为完全相同，仅为兼容旧脚本保留，新脚本应使用连字符形式。`ocr` 的 `rect` 位置参数使用竖线分隔的物理像素整数（`left|top|right|bottom`），与 Python 侧的元组 `region` 对应。
 
 ## 13. Inspector API
 
@@ -1113,9 +1137,10 @@ CLI `inspect` 使用 [inspector.py](../asclient/inspector.py) 的公开函数：
 from asclient import AScriptClient
 from asclient.inspector import serve, run_forever
 
-client = AScriptClient("192.168.3.17:9096")
+client = AScriptClient("192.168.3.17:9096")   # 目标设备地址在这里指定
 server = serve(client, host="127.0.0.1", port=0, open_browser=True)
-print(server.server_port)
+print(server.server_port)                     # port=0 时必须从这里读取实际端口
+server.serve_forever()                        # serve() 只创建服务器，需要自行运行
 
 # 或阻塞运行到 Ctrl+C。
 run_forever(client, host="127.0.0.1", port=0)
@@ -1124,9 +1149,19 @@ run_forever(client, host="127.0.0.1", port=0)
 | 函数 | 说明 |
 | --- | --- |
 | `serve(client, host="127.0.0.1", port=0, open_browser=True, output_dir=None)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口；`output_dir` 指定“裁剪保存”的落盘目录，默认当前工作目录 |
-| `run_forever(...) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL |
+| `run_forever(client, host="127.0.0.1", port=0, open_browser=True) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL。不接受 `output_dir`，裁剪图固定落在当前工作目录 |
 
-Inspector 只应绑定 `127.0.0.1`。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部“裁剪保存”按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
+`host`/`port` 只决定 Inspector 自身的 HTTP 监听地址，与连接哪台设备无关——设备由传入的 `client` 决定。CLI 侧对应关系为：
+
+| 概念 | CLI | Python |
+| --- | --- | --- |
+| 目标设备 | 全局 `--device HOST[:PORT]` / 配置 `device.address` | `AScriptClient(address)` |
+| Inspector 监听地址 | `inspect --host`（默认 `127.0.0.1`） | `serve(host=...)` |
+| Inspector 监听端口 | `inspect --port`（默认 `0` 随机） | `serve(port=...)` |
+| 是否自动开浏览器 | `inspect --no-browser` | `serve(open_browser=False)` |
+| 裁剪图落盘目录 | 不可配置，固定为当前工作目录 | `serve(output_dir=...)` |
+
+Inspector 只应绑定 `127.0.0.1`。`/api/snapshot`、`/api/selector` 与 `/api/crop` 都没有鉴权机制，`--host 0.0.0.0` 会把设备截图与控件树暴露给同网段所有主机，因此该参数仅保留给隔离环境下的特殊调试，不应在日常或生产中使用。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部“裁剪保存”按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
 
 CLI 启动时会打印实际 Inspector URL。浏览器在刷新或关闭页面时取消正在传输的快照属于正常情况，客户端会静默结束该响应，不会影响设备端状态或打印终端堆栈。
 
