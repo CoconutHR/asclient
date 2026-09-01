@@ -202,6 +202,7 @@ class ScreenFrame:
 
     def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> "ImageMatch | None":
         from .client import ImageMatch
+        from PIL import ImageChops, ImageStat
         if not math.isfinite(confidence) or not 0 < confidence <= 1: raise ValueError("confidence must be a finite number in (0, 1]")
         needle = self._template(template)
         if self._rgb is None: self._rgb = self._image.convert("RGB")
@@ -212,7 +213,7 @@ class ScreenFrame:
         exact = self._find_exact(needle, (x0, y0, x1, y1))
         if exact is not None:
             return exact
-        source_pixels, template_pixels = haystack.load(), needle.image.load()
+        source_pixels = haystack.load()
         pixel_count = template_width * template_height * 3
         allowed = (1 - confidence) * 255 * pixel_count
         best = None
@@ -224,13 +225,8 @@ class ScreenFrame:
                     error += abs(one[0] - two[0]) + abs(one[1] - two[1]) + abs(one[2] - two[2])
                     if error > allowed: break
                 if error > allowed: continue
-                error = 0
-                for ty in range(template_height):
-                    for tx in range(template_width):
-                        one, two = source_pixels[x + tx, y + ty], template_pixels[tx, ty]
-                        error += abs(one[0] - two[0]) + abs(one[1] - two[1]) + abs(one[2] - two[2])
-                        if error > allowed: break
-                    if error > allowed: break
+                candidate = haystack.crop((x, y, x + template_width, y + template_height))
+                error = sum(ImageStat.Stat(ImageChops.difference(candidate, needle.image)).sum)
                 score = 1 - error / (255 * pixel_count)
                 if error <= allowed and (best is None or score > best.confidence): best = ImageMatch(x, y, template_width, template_height, score)
         return best
