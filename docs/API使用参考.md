@@ -144,6 +144,37 @@ assert client.ping() == "iOS"
 
 `health: "degraded"` 表示客户端发现设备端 `/api/status` 的兼容性问题，但已成功执行降级探测；不是设备不可用。`compatibility.capabilities` 明确列出屏幕和当前应用信息是否成功取得。不要把所有 status 字段作为跨版本契约。
 
+### `init` 命令
+
+```bat
+py -m asclient init
+py -m asclient init --device 192.168.3.17:9096
+py -m asclient init --print
+py -m asclient --config envs\usb.json init
+```
+
+`init` 在当前目录生成一份**完整**的 `asclient.json`——所有配置键都带默认值。JSON 不支持注释，写全键值是唯一的自文档形式：文件本身就展示了有哪些项可调。它与 `help` 一样不连接设备，因此可以在手机尚未就绪时先行初始化。
+
+生成内容与行为：
+
+| 行为 | 说明 |
+| --- | --- |
+| `device.address` 默认值 | `127.0.0.1:9096`，即 USB 隧道场景；用 `--device` 可直接写入其他地址 |
+| 日志端口 | `local_log_port` 与 `remote_log_port` 均为 `10102`，`forward_logs` 为 `true` |
+| `tunnel.iproxy` | 自动探测 PATH 中的 `iproxy` 并写入绝对路径；找不到则保留 `"iproxy"` 并提示 |
+| `device.password` / `tunnel.udid` | 一律生成空值 |
+| 已存在同名文件 | 直接失败并返回退出码 `1`，不做任何修改；确需覆盖用 `--force` |
+| `--print` | 只把内容输出到标准输出，不落盘，便于审查或重定向 |
+| `--config PATH` | 生成到指定路径，父目录会自动创建，可用于维护多套环境配置 |
+
+三点需要注意：
+
+1. **`init` 不接受 `--password`。** 命令行传入的密码会进入 shell 历史记录，与本项目「密码只存在于被 Git 忽略的配置文件中」的要求相悖。生成的是空值，请自行编辑填写。
+2. **默认的回环地址会影响 `doctor` 的判定。** `doctor` 用地址是否为回环来区分使用场景：地址为回环时缺少 `iproxy` 属于 `error`（退出码 `1`），非回环时只是 `warning`。纯 Wi-Fi 用户应把 `device.address` 改成手机上显示的地址，否则首次 `doctor` 会看到一个其实无需处理的错误。生成时命令行也会打印这条提示。
+3. **配置未被 Git 忽略时会警告。** 若生成位置处于 Git 仓库内且 `.gitignore` 没有覆盖该文件，`init` 会向标准错误打印警告——该文件即将保存密码、UDID 与内网地址。
+
+`init` 是唯一能生成完整配置的命令。`doctor --fix-iproxy` 仍然保留，但它只写 `tunnel.iproxy` 一个键；两者的分工是：`init` 负责从零建立配置，`doctor` 负责诊断并在确认后修正 `iproxy` 路径。
+
 ### `doctor` 命令
 
 ```bat
@@ -1096,6 +1127,7 @@ py -m asclient remove smoke --yes
 | --- | --- | --- |
 | `ping` | `ping` | 探测服务 |
 | `help` | `help [COMMAND]` | 输出当前语言下的简明说明，不连接设备 |
+| `init` | `init [--device ADDRESS] [--force] [--print]` | 在当前目录生成完整的 `asclient.json`，不连接设备；已存在时拒绝覆盖 |
 | `doctor` | `doctor [--report FILE] [--fix-iproxy PATH] [--yes]` | 诊断本机工具、端口、设备与日志；仅对已验证的 `iproxy` 路径提供经确认的配置修复 |
 | `status` | `status` | 输出设备状态或兼容降级状态 |
 | `pkgs` | `pkgs` | 列出设备 Python 包 |
@@ -1140,7 +1172,7 @@ py -m asclient remove smoke --yes
 | `eval` | `--yes eval CODE` | 执行受信任设备端 Python |
 | `api` | `--yes api METHOD PATH [--params JSON] [--form JSON]` | 原始端点透传 |
 
-要求 `--yes` 的完整清单为：`create`、`rename`、`remove`、`push`、`run`、`stop`、`deploy`、`eval`、`mv`、`api`、`tap`、`tap-rel`、`swipe`、`swipe-rel`、`input`、`home`、`app-start`、`app-stop`、`lock`、`unlock`、`openurl`、`key`、`notification`，以及带 `TEXT` 参数的 `clipboard`（写入）。之所以连原始 `api` 也要求确认，是因为 AScript 的原始 GET 路由同样可能改变状态。其余命令（`ping`、`status`、`shot`、`dump`、`observe`、`inspect`、`tunnel`、`ocr`、`findcolor`、`compare`、`ls`、`files`、`pull`、`log`、`cat`、`app`、`app-state`、`orientation`、`device-info`、`battery`、`pkgs`、`doctor`、`help`）为只读，不需要确认。将变更类命令放在明确的运维或测试步骤中，避免作为排错时的随手命令。
+要求 `--yes` 的完整清单为：`create`、`rename`、`remove`、`push`、`run`、`stop`、`deploy`、`eval`、`mv`、`api`、`tap`、`tap-rel`、`swipe`、`swipe-rel`、`input`、`home`、`app-start`、`app-stop`、`lock`、`unlock`、`openurl`、`key`、`notification`，以及带 `TEXT` 参数的 `clipboard`（写入）。之所以连原始 `api` 也要求确认，是因为 AScript 的原始 GET 路由同样可能改变状态。其余命令（`ping`、`status`、`shot`、`dump`、`observe`、`inspect`、`tunnel`、`ocr`、`findcolor`、`compare`、`ls`、`files`、`pull`、`log`、`cat`、`app`、`app-state`、`orientation`、`device-info`、`battery`、`pkgs`、`doctor`、`help`、`init`）对**设备**都是只读的，不需要确认。注意 `init` 虽然不改设备，但会写本地配置文件——它自带覆盖保护（已存在即失败），因此用 `--force` 而非 `--yes` 表达确认。将变更类命令放在明确的运维或测试步骤中，避免作为排错时的随手命令。
 
 时长参数补充说明：`--duration`、`--duration-ms`、`--duration-s` 三者互斥，同时给出会被 `argparse` 拒绝。`--duration-ms` 与 `--duration-s` 各自还接受下划线别名 `--duration_ms` / `--duration_s`，行为完全相同，仅为兼容旧脚本保留，新脚本应使用连字符形式。`ocr` 的 `rect` 位置参数使用竖线分隔的物理像素整数（`left|top|right|bottom`），与 Python 侧的元组 `region` 对应。
 

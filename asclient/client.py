@@ -24,6 +24,10 @@ from .vision import PixelColor, ScreenFrame, relative_point as _relative_frame_p
 from ._websocket import WebSocket
 
 
+LOG_PORT = 10102
+"""Device-side log WebSocket port; the device service does not make it configurable."""
+
+
 @dataclass(frozen=True)
 class DeviceAddress:
     host: str
@@ -1300,13 +1304,13 @@ class AScriptClient:
         if deadline is not None:
             connect_timeout = min(connect_timeout, max(0.001, deadline - time.monotonic()))
         try:
-            websocket = WebSocket.connect(self.address.host, 10102, "/log/", timeout=connect_timeout, headers=headers, deadline=deadline, stop_event=stop_event)
+            websocket = WebSocket.connect(self.address.host, LOG_PORT, "/log/", timeout=connect_timeout, headers=headers, deadline=deadline, stop_event=stop_event)
         except TimeoutError:
             if (deadline is not None and time.monotonic() >= deadline) or (stop_event is not None and stop_event.is_set()):
                 return True
             raise
         except OSError as exc:
-            raise DeviceConnectionError(t("cannot_reach_logs", host=self.address.host, detail=exc)) from exc
+            raise DeviceConnectionError(t("cannot_reach_logs", host=self.address.host, port=LOG_PORT, detail=exc)) from exc
         try:
             while not stop_event or not stop_event.is_set():
                 if deadline is not None:

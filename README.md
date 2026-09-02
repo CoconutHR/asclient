@@ -10,11 +10,13 @@
 
 ```bat
 py -m pip install --user --upgrade .
-copy asclient.example.json asclient.json
+py -m asclient init
 edit asclient.json
 ```
 
-`asclient.json` 中把 `device.address` 改为手机 AScript 页面显示的地址，例如 `192.168.3.17:9096`。然后验证连接：
+`init` 会生成一份包含全部配置键的 `asclient.json`，并自动填入已安装的 `iproxy` 路径；它不连接设备，可在手机就绪前先执行。已存在同名文件时会拒绝覆盖，确需重建加 `--force`。也可以照旧 `copy asclient.example.json asclient.json`。
+
+`asclient.json` 中把 `device.address` 改为手机 AScript 页面显示的地址，例如 `192.168.3.17:9096`（USB 隧道场景保持默认的 `127.0.0.1:9096`）。然后验证连接：
 
 ```bat
 py -m asclient status
@@ -111,16 +113,16 @@ device.run_project("demo")
 
 ## 安装与配置
 
-在仓库根目录安装，复制配置模板后填写设备地址。真实 `asclient.json` 已被 Git 忽略，其中的密码、UDID 与内网地址不得提交。
+在仓库根目录安装，用 `init` 生成配置后填写设备地址。真实 `asclient.json` 已被 Git 忽略，其中的密码、UDID 与内网地址不得提交；`init` 在检测到配置未被忽略时会主动警告。
 
 ```bat
 py -m pip install --user --upgrade .
-copy asclient.example.json asclient.json
+py -m asclient init
 edit asclient.json
 py -m asclient doctor
 ```
 
-以上为 Windows 写法；macOS/Linux 将 `py` 替换为 `python3`、`copy` 替换为 `cp`，`edit` 表示用任意文本编辑器打开该文件。安装后 `asc` 命令也可用（需将 Python 用户 `Scripts` 目录加入 `PATH`，见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节），例如 `asc doctor`。
+以上为 Windows 写法；macOS/Linux 将 `py` 替换为 `python3`，`edit` 表示用任意文本编辑器打开该文件。安装后 `asc` 命令也可用（需将 Python 用户 `Scripts` 目录加入 `PATH`，见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节），例如 `asc doctor`。
 
 常用配置项：
 

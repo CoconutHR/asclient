@@ -58,6 +58,7 @@ def _confirm(args: argparse.Namespace, client: AScriptClient, action: str) -> No
 _HELP: dict[str, tuple[str, str]] = {
     "ping": ("ping\n探测设备服务并返回平台（iOS/Android）。", "ping\nProbe the device service and report its platform (iOS/Android)."),
     "help": ("help [命令]\n显示全部命令速查或单个命令的详细说明。", "help [COMMAND]\nShow the command overview or details for one command."),
+    "init": ("init [--device 地址] [--force] [--print]\n在当前目录生成完整的 asclient.json，默认 device.address 为 127.0.0.1:9096 并自动填入已安装的 iproxy 路径。已存在时不覆盖，除非加 --force；--print 只输出内容不落盘。", "init [--device ADDRESS] [--force] [--print]\nCreate a complete asclient.json in the current directory, defaulting device.address to 127.0.0.1:9096 and filling in a detected iproxy path. Existing files are never overwritten without --force; --print writes to stdout only."),
     "doctor": ("doctor [--report FILE] [--fix-iproxy PATH] [--yes]\n诊断本地工具、端口、设备服务和日志服务；仅在 --yes 确认后写入安全配置修复。", "doctor [--report FILE] [--fix-iproxy PATH] [--yes]\nDiagnose local tools, ports, device service, and logs; write safe fixes only after --yes confirmation."),
     "status": ("status\n查看设备可用性、屏幕尺寸和当前前台应用。", "status\nShow availability, screen size, and foreground app."),
     "pkgs": ("pkgs\n列出设备端 Python 包。", "pkgs\nList device-side Python packages."),
@@ -128,6 +129,7 @@ def _print_help(topic: str | None = None) -> None:
 配置文件：默认读取当前目录的 asclient.json。可设置顶层 language 为 auto、zh-CN 或 en。
 
 常用命令：
+  init       生成 asclient.json 配置文件（不连接设备）
   doctor     诊断本机、USB 隧道、设备服务和日志服务
   status     查看设备状态与当前前台应用
   tunnel     通过 USB 转发 9096 控制端口及 10102 日志端口
@@ -147,6 +149,7 @@ Usage: py -m asclient [--config FILE] [--device ADDRESS] [--lang zh-CN|en] <comm
 Configuration: reads asclient.json from the current directory by default. The top-level language can be auto, zh-CN, or en.
 
 Common commands:
+  init       Create an asclient.json configuration file (no device needed)
   doctor     Diagnose local tools, USB tunnel, device service, and log service
   status     Show device status and foreground app
   tunnel     Forward USB control port 9096 and log port 10102
@@ -179,6 +182,31 @@ def _confirm_repair(args: argparse.Namespace) -> bool:
         return False
 
 
+def _run_init(args: argparse.Namespace) -> int:
+    """Create a full configuration file; the only command that writes one."""
+    from .initializer import LOOPBACK_ADDRESS, build_config, detect_iproxy, is_git_ignored, render_config, write_config
+
+    address = args.init_device or LOOPBACK_ADDRESS
+    iproxy = detect_iproxy()
+    config = build_config(address=address, iproxy=iproxy)
+    if args.print_only:
+        sys.stdout.write(render_config(config))
+        return 0
+    try:
+        target = write_config(config, args.config, force=args.force)
+    except FileExistsError as exc:
+        print(t("init_exists", path=Path(str(exc)).resolve()), file=sys.stderr)
+        return 1
+    print(t("init_written", path=target))
+    print(t("init_iproxy_found", path=iproxy) if iproxy else t("init_iproxy_missing"))
+    if address == LOOPBACK_ADDRESS:
+        print(t("init_loopback_hint", address=address))
+    if is_git_ignored(target) is False:
+        print(t("init_gitignore_warning", path=target), file=sys.stderr)
+    print(t("init_next_steps"))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AScript 本地 iOS 设备客户端" if current_language() == "zh" else "AScript local iOS device client")
     parser.add_argument("--config", help="JSON config path; defaults to ./asclient.json when present")
@@ -190,6 +218,10 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     help_command = commands.add_parser("help", help="show concise usage help")
     help_command.add_argument("topic", nargs="?")
+    initialize = commands.add_parser("init", help="create a complete asclient.json in the current directory")
+    initialize.add_argument("--device", dest="init_device", metavar="ADDRESS", help="device address to write; defaults to 127.0.0.1:9096")
+    initialize.add_argument("--force", action="store_true", help="overwrite an existing configuration file")
+    initialize.add_argument("--print", dest="print_only", action="store_true", help="print the configuration without writing it")
     doctor = commands.add_parser("doctor", help="diagnose local tools and device connectivity")
     doctor.add_argument("--fix-iproxy", metavar="PATH", help="save a validated absolute iproxy path after confirmation")
     doctor.add_argument("--report", metavar="FILE", help="write a password-free JSON diagnostic report")
@@ -259,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "help":
             _print_help(args.topic)
             return 0 if not args.topic or args.topic in _HELP else 1
+        if args.command == "init":
+            return _run_init(args)
         client = _client(args)
         cmd = args.command
         if cmd == "doctor":
