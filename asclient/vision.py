@@ -24,6 +24,25 @@ _TEMPLATE_CACHE: OrderedDict[tuple[str, int, int], _TemplateData] = OrderedDict(
 _TEMPLATE_CACHE_LIMIT = 32
 _TEMPLATE_CACHE_LOCK = threading.RLock()
 
+_OPENCV_AVAILABLE: bool | None = None
+
+
+def _opencv_available() -> bool:
+    """探测 cv2 与 numpy 是否都可导入（结果缓存）；决定模糊匹配走 OpenCV 还是 Pillow。
+
+    OpenCV 的 matchTemplate 依赖 numpy 做图像数组转换，两者任一缺失都应
+    整体视为「OpenCV 引擎不可用」并降级到纯 Pillow，避免匹配中途抛错。
+    """
+    global _OPENCV_AVAILABLE
+    if _OPENCV_AVAILABLE is None:
+        try:
+            import cv2  # noqa: F401
+            import numpy  # noqa: F401
+            _OPENCV_AVAILABLE = True
+        except ImportError:
+            _OPENCV_AVAILABLE = False
+    return _OPENCV_AVAILABLE
+
 
 @dataclass(frozen=True)
 class PixelColor:
@@ -201,8 +220,6 @@ class ScreenFrame:
         return None
 
     def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> "ImageMatch | None":
-        from .client import ImageMatch
-        from PIL import ImageChops, ImageStat
         if not math.isfinite(confidence) or not 0 < confidence <= 1: raise ValueError("confidence must be a finite number in (0, 1]")
         needle = self._template(template)
         if self._rgb is None: self._rgb = self._image.convert("RGB")
@@ -213,6 +230,46 @@ class ScreenFrame:
         exact = self._find_exact(needle, (x0, y0, x1, y1))
         if exact is not None:
             return exact
+        # 模糊匹配：优先用 OpenCV 的 matchTemplate（与 pyautogui 同引擎），
+        # cv2 不可用时降级到纯 Pillow 实现。cv2 可用时直接信任其结果，
+        # 不再额外跑一遍慢速的 Pillow 全扫描。
+        if _opencv_available():
+            return self._find_opencv(needle, (x0, y0, x1, y1), confidence)
+        return self._find_pillow(needle, haystack, (x0, y0, x1, y1), confidence)
+
+    def _find_opencv(self, needle: _TemplateData, region: tuple[int, int, int, int], confidence: float) -> "ImageMatch | None":
+        """用 OpenCV matchTemplate 做归一化相关系数匹配；无命中时返回 None。
+
+        与 pyautogui/pyscreeze 相同的引擎。``TM_CCOEFF_NORMED`` 的相关系数
+        落在 [-1, 1]，越接近 1 越相似；此处以 1.0 为完全一致基准，将
+        ``confidence`` 视作相关系数阈值，返回最佳命中（低于阈值时 None）。
+        """
+        import cv2
+        from .client import ImageMatch
+        x0, y0, x1, y1 = region
+        template_width, template_height = needle.image.size
+        haystack = ScreenFrame._as_numpy(self._rgb, x0, y0, x1, y1)
+        template = ScreenFrame._as_numpy(needle.image, 0, 0, template_width, template_height)
+        result = cv2.matchTemplate(haystack, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val < confidence:
+            return None
+        x, y = max_loc
+        return ImageMatch(x0 + x, y0 + y, template_width, template_height, float(max_val))
+
+    @staticmethod
+    def _as_numpy(image, x0: int, y0: int, x1: int, y1: int):
+        """把 PIL RGB 图像（或其区域）转成 OpenCV 需要的 BGR uint8 数组。"""
+        import numpy as np
+        crop = image.crop((x0, y0, x1, y1)) if (x0, y0, x1, y1) != (0, 0, image.width, image.height) else image
+        return np.asarray(crop, dtype=np.uint8)[:, :, ::-1]
+
+    def _find_pillow(self, needle: _TemplateData, haystack, region: tuple[int, int, int, int], confidence: float) -> "ImageMatch | None":
+        """纯 Pillow 的模糊匹配降级实现，行为与优化前的 find_image 一致。"""
+        from .client import ImageMatch
+        from PIL import ImageChops, ImageStat
+        x0, y0, x1, y1 = region
+        template_width, template_height = needle.image.size
         source_pixels = haystack.load()
         pixel_count = template_width * template_height * 3
         allowed = (1 - confidence) * 255 * pixel_count

@@ -1,6 +1,6 @@
 # AScript 本地客户端
 
-`asclient` 是 AScript iOS 本地设备服务的 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力；仅本机模板匹配功能依赖 Pillow。
+`asclient` 是 AScript iOS 本地设备服务的 Python 库与命令行客户端。它不修改 IPA、不向手机安装组件，通过设备已有的 `9096` HTTP 服务和 `10102` 日志 WebSocket 提供截图、控件树、坐标操作、项目管理、OCR、日志与自动化能力；仅本机模板匹配功能依赖 Pillow（可选，模糊匹配还可用 OpenCV 加速）。
 
 完整中文文档：[从零开始使用教程](docs/从零开始使用教程.md)、[生产使用指南](docs/生产使用指南.md)、[API 使用参考](docs/API使用参考.md)、[USB 隧道运维指南](docs/USB隧道运维指南.md)、[发布与验收流程](docs/发布与验收流程.md)、[变更说明](docs/变更说明.md)。
 
@@ -122,7 +122,7 @@ edit asclient.json
 py -m asclient doctor
 ```
 
-需要模板匹配、找图等视觉功能时，改用 `py -m pip install --user --upgrade ".[vision]"` 一并安装可选依赖 Pillow。
+需要模板匹配、找图等视觉功能时，改用 `py -m pip install --user --upgrade ".[vision]"` 一并安装可选依赖 Pillow 与 OpenCV（`opencv-python-headless`）。OpenCV 用于模糊匹配加速，未安装时自动降级到纯 Pillow 实现，功能不受影响。
 
 以上为 Windows 写法；macOS/Linux 将 `py` 替换为 `python3`，`edit` 表示用任意文本编辑器打开该文件。安装后 `asc` 命令也可用（需将 Python 用户 `Scripts` 目录加入 `PATH`，见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节），例如 `asc doctor`。
 
@@ -264,4 +264,4 @@ py -m unittest discover -s tests -p test_integration.py -v
 
 CLI 有三种等价调用：Windows 推荐 `py -m asclient`（不依赖 `Scripts` 目录是否加入 `PATH`）；macOS/Linux 使用 `python3 -m asclient`；`Scripts` 目录已加入 `PATH` 时可直接用最短的 `asc <命令>`（配置方法见[从零开始使用教程](docs/从零开始使用教程.md)的 2.3 节）。兼容入口 `py asc.py ...` 仍然可用。
 
-除模板匹配所需的 Pillow 外，该库只依赖 Python 标准库；Pillow 是可选依赖，需要视觉功能时用 `pip install "asclient[vision]"` 安装。移动端 API 已针对 iOS 4001 IPA 进行静态分析，并已通过真实 USB 连接验证；生产发布前仍应在目标 App、目标 iOS 版本和目标设备上执行集成验收。
+除模板匹配所需的 Pillow（以及可选的 OpenCV 加速）外，该库只依赖 Python 标准库；Pillow 与 OpenCV 均为可选依赖，需要视觉功能时用 `pip install "asclient[vision]"` 安装，模糊匹配在装有 OpenCV 时自动走 `cv2.matchTemplate` 加速、否则降级到纯 Pillow。移动端 API 已针对 iOS 4001 IPA 进行静态分析，并已通过真实 USB 连接验证；生产发布前仍应在目标 App、目标 iOS 版本和目标设备上执行集成验收。
