@@ -173,6 +173,8 @@ py -m asclient --config envs\usb.json init
 2. **默认的回环地址会影响 `doctor` 的判定。** `doctor` 用地址是否为回环来区分使用场景：地址为回环时缺少 `iproxy` 属于 `error`（退出码 `1`），非回环时只是 `warning`。纯 Wi-Fi 用户应把 `device.address` 改成手机上显示的地址，否则首次 `doctor` 会看到一个其实无需处理的错误。生成时命令行也会打印这条提示。
 3. **配置未被 Git 忽略时会警告。** 若生成位置处于 Git 仓库内且 `.gitignore` 没有覆盖该文件，`init` 会向标准错误打印警告——该文件即将保存密码、UDID 与内网地址。
 
+关于 `iproxy` 路径的一个细节：`init` 保存 `PATH` 中查到的路径本身，而 `doctor` 显示的是解析符号链接后的真实路径，因此两者可能不同。以 Homebrew 为例，`init` 写入 `/opt/homebrew/bin/iproxy`，`doctor` 显示 `/opt/homebrew/Cellar/libusbmuxd/<版本>/bin/iproxy`。这是有意的：包管理器升级后版本目录会变化，保存稳定的链接路径才不会在升级后失效。两种写法都能正常工作。
+
 `init` 是唯一能生成完整配置的命令。`doctor --fix-iproxy` 仍然保留，但它只写 `tunnel.iproxy` 一个键；两者的分工是：`init` 负责从零建立配置，`doctor` 负责诊断并在确认后修正 `iproxy` 路径。
 
 ### `doctor` 命令
