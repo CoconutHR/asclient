@@ -154,6 +154,21 @@ py -m asclient doctor --fix-iproxy "D:\\tools\\libimobiledevice\\iproxy.exe"
 
 诊断会检查 `iproxy`、本地 USB 映射端口、设备 HTTP 服务、`/api/status` 兼容降级和日志端口。默认只读。它从不自动安装第三方二进制、停止其他程序或修改手机。唯一内置修复是验证用户提供的 `iproxy` 文件并写入 `asclient.json` 的 `tunnel.iproxy`；写入前需要交互确认，也可加 `--yes` 供已审查的脚本使用。`--report` 写出不含密码的 JSON 证据文件。
 
+`doctor` 自身只有三个参数（`--report`、`--fix-iproxy`、`--yes`），它**不接受**设备地址、端口或超时参数。诊断目标完全来自全局参数与配置文件，因此两种效果的实现方式不同：
+
+| 目标 | 做法 | 是否落盘 |
+| --- | --- | --- |
+| 临时诊断另一台设备 | `py -m asclient --device 192.168.3.25:9096 doctor` | 不落盘，仅影响本次 |
+| 临时使用另一套完整配置 | `py -m asclient --config path\to\other.json doctor` | 不落盘，读取指定文件 |
+| 固定 `iproxy` 路径 | `py -m asclient doctor --fix-iproxy <绝对路径>` | 写入 `tunnel.iproxy` |
+| 固定设备地址、端口、密码等 | 直接编辑 `asclient.json` | 由用户编辑 |
+
+`--fix-iproxy` 是 `doctor` 唯一的写配置能力，且只写 `tunnel.iproxy` 这一个键；没有 `--fix-device` 之类的对应参数，设备地址必须手工写入配置文件。该修复在配置文件已存在时会保留其余所有字段（包括 `device` 段与 `tunnel` 的其他键）；配置文件不存在时会新建一个仅含 `tunnel.iproxy` 的最小文件，此时 `device.address` 仍为内置默认值，需要另行补写。
+
+因为全局参数必须写在子命令之前，`py -m asclient doctor --device ...` 会被 `argparse` 判为 `unrecognized arguments` 而失败。`--yes` 是唯一可写在 `doctor` 之后的参数，作用是跳过 `--fix-iproxy` 的交互确认；在非 TTY 环境（CI、管道）下不加 `--yes` 会直接放弃写入并提示。
+
+诊断中的日志端口探测使用 `tunnel.remote_log_port`（默认 `10102`）。自定义该端口时诊断结果会同步跟随，无需额外参数。
+
 ### 语言选择
 
 CLI 默认按操作系统语言输出：中文系统为中文，其他系统为英文。配置文件顶层可设置 `"language": "auto"`、`"zh-CN"` 或 `"en"`；单次命令可用 `--lang zh-CN` 或 `--lang en` 覆盖。运行 `py -m asclient help` 获取中文友好命令速查，`py -m asclient help doctor` 可查看单个命令。

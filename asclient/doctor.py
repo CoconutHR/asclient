@@ -81,12 +81,13 @@ def diagnose(client: AScriptClient, config: Mapping[str, Any]) -> list[DoctorChe
             checks.append(DoctorCheck(name, "ok", t("doctor_port_tunnel", host=host, port=port), "active_local_tunnel"))
         else:
             checks.append(DoctorCheck(name, "warning", t("doctor_port_busy", host=host, port=port)))
+    remote_log_port = int(options.get("remote_log_port", 10102))
     try:
-        with socket.create_connection((client.address.host, 10102), timeout=min(client.timeout, 3)):
+        with socket.create_connection((client.address.host, remote_log_port), timeout=min(client.timeout, 3)):
             pass
-        checks.append(DoctorCheck("log_service", "ok", t("doctor_log_ok", host=client.address.host)))
+        checks.append(DoctorCheck("log_service", "ok", t("doctor_log_ok", host=client.address.host, port=remote_log_port)))
     except OSError as exc:
-        checks.append(DoctorCheck("log_service", "warning", t("doctor_log_failed", host=client.address.host, detail=exc), str(exc)))
+        checks.append(DoctorCheck("log_service", "warning", t("doctor_log_failed", host=client.address.host, port=remote_log_port, detail=exc), str(exc)))
     return checks
 
 
