@@ -505,7 +505,7 @@ client.tap(*target.center)
 client.scroll_until_image("assets/target.png", swipe_relative=(0.7, 0.75, 0.35, 0.25), duration=0.65)
 ```
 
-模板匹配依赖 Pillow，随 `asclient` 一起安装。相同分辨率下的原图模板会优先走完整 RGB 精确匹配快路径；确实需要容差的候选才进入完整置信度计算。容差匹配会随搜索面积和模板面积增加计算量，生产脚本应尽量传入 `region` / `region_relative`，并复用同一个 `ScreenFrame`。`scripts/benchmark-vision.py` 可在目标 Windows 主机和设备上测量常见模板尺寸，默认只输出 JSON，不保存设备截图。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
+模板匹配依赖 Pillow，它是可选依赖，需用 `pip install "asclient[vision]"` 安装（未安装时调用视觉接口会抛 `RuntimeError` 并给出该命令；其余功能不受影响）。相同分辨率下的原图模板会优先走完整 RGB 精确匹配快路径；确实需要容差的候选才进入完整置信度计算。容差匹配会随搜索面积和模板面积增加计算量，生产脚本应尽量传入 `region` / `region_relative`，并复用同一个 `ScreenFrame`。`scripts/benchmark-vision.py` 可在目标 Windows 主机和设备上测量常见模板尺寸，默认只输出 JSON，不保存设备截图。`wait_image()` 与 `wait_image_gone()` 的 `log=False` 默认静默；设为 `True` 会在本机终端逐轮输出匹配状态。它是视觉定位降级方案：应优先使用唯一的语义选择器；模板必须在同一分辨率和界面缩放条件下采集。
 
 ### `capture_artifacts(destination, *, prefix="failure", mode="smart") -> dict[str, Path]`
 

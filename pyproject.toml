@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asclient"
-version = "0.9.0"
+version = "0.9.1"
 description = "AScript local iOS device client"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,10 @@ classifiers = [
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
-dependencies = ["Pillow>=9.0"]
+dependencies = []
+
+[project.optional-dependencies]
+vision = ["Pillow>=9.0"]
 
 [project.urls]
 Homepage = "https://github.com/CoconutHR/asclient"

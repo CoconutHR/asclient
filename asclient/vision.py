@@ -71,7 +71,7 @@ class ScreenFrame:
     """One immutable device screenshot using physical-pixel coordinates."""
     def __init__(self, png: bytes):
         try: from PIL import Image
-        except ImportError as exc: raise RuntimeError("vision features require Pillow; reinstall asclient to install its dependencies") from exc
+        except ImportError as exc: raise RuntimeError("vision features require Pillow; install it with: pip install \"asclient[vision]\"") from exc
         self.png = bytes(png)
         with Image.open(BytesIO(self.png)) as source: self._image = source.convert("RGBA")
         self.width, self.height = self._image.size
@@ -147,7 +147,7 @@ class ScreenFrame:
     @staticmethod
     def _template(template: str | Path | bytes):
         try: from PIL import Image
-        except ImportError as exc: raise RuntimeError("image matching requires Pillow; reinstall asclient to install its dependencies") from exc
+        except ImportError as exc: raise RuntimeError("image matching requires Pillow; install it with: pip install \"asclient[vision]\"") from exc
         if isinstance(template, bytes):
             with Image.open(BytesIO(template)) as source: decoded = source.convert("RGB")
             return ScreenFrame._template_data(decoded)
