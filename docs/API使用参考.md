@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应已发布的 ASClient `0.9.0`。标记为 `0.9.1（未发布）` 的能力仅存在于当前主分支，尚未包含在 `v0.9.0` tag；除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应当前主分支 ASClient `0.9.3（未发布）`；除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -454,6 +454,8 @@ colors = frame.pixels_relative([(0.1, 0.1), (0.9, 0.9)])
 ### `find_image()`、`find_images()`、`find_any_image()` 与 `wait_any_image()`
 
 在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有结果坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。
+
+为避免把整张 PNG 回传主机，`confidence < 1` 的主机侧匹配会优先使用设备已有的 `/api/hid/screenshot` JPEG 帧；该接口在 HID 录屏扩展可用时可显著降低 USB 取图延迟，缺失或异常时自动回退常规 PNG 截图，无需改动调用代码或设备端软件。HID JPEG 是有损图像，因此 `confidence=1.0` 的精确匹配仍固定使用无损 PNG；`screenshot()`、`pixel()` 和 `assert_color()` 等需要 PNG/精确像素语义的接口也不会使用该快路径。
 
 单模板和所有图像等待/点击/滚动 API 都可用物理像素 `region=(left, top, right, bottom)` 或比例 `region_relative=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_relative` 为按模板名称映射的同类区域；每张模板可有自己的小区域。旧 `region_pixels` / `regions_pixels` 是物理像素弃用别名，会发出 `DeprecationWarning`。旧版比例 `region` 仅在包含非整数时暂时兼容并发出警告；尤其旧全屏写法 `region=(0, 0, 1, 1)` 必须改为 `region_relative=(0, 0, 1, 1)`，因为新规则下它表示 1×1 物理像素区域。
 

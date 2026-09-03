@@ -71,8 +71,10 @@ class ClientTests(unittest.TestCase):
         # 文案断言固定为英文，避免测试结果依赖操作系统语言。
         set_language("en")
         self.addCleanup(set_language, None)
-        # 坐标缓存按测试隔离，避免跨用例泄漏尺寸。
+        # 坐标与 HID 能力缓存按测试隔离，避免跨用例泄漏尺寸或降级状态。
         self.client._space_cache = None
+        self.client._hid_vision_available = None
+        self.client._vision_action_dimensions = None
 
     def test_ping_screenshot_and_ui_xml(self):
         self.assertEqual(self.client.ping(), "iOS")
@@ -111,6 +113,74 @@ class ClientTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual((match.x, match.y, match.width, match.height), (12, 8, 4, 3))
         self.assertIsNone(self.client._image_match(source_data.getvalue(), template_data.getvalue(), confidence=0.99, region=(0, 0, 0.4, 0.3)))
+
+    def test_hid_vision_frame_maps_coordinates_without_changing_png_screenshot_contract(self):
+        from io import BytesIO
+        from PIL import Image
+
+        source = Image.new("RGB", (12, 10), "black")
+        template = Image.new("RGB", (3, 2), "black")
+        for y in range(2):
+            for x in range(3):
+                template.putpixel((x, y), (20 + x * 60, 40 + y * 80, 180))
+        source.paste(template, (6, 4))
+        jpeg, png, template_data = BytesIO(), BytesIO(), BytesIO()
+        source.save(jpeg, "JPEG", quality=100, subsampling=0)
+        source.save(png, "PNG")
+        with Image.open(BytesIO(jpeg.getvalue())) as decoded:
+            decoded.crop((6, 4, 9, 6)).save(template_data, "PNG")
+        calls = []
+        original_request, original_screenshot, original_action_size = self.client.request, self.client.screenshot, self.client.action_size
+        self.client.request = lambda method, path, **kwargs: calls.append(path) or json.dumps({"source": "hid", "value": base64.b64encode(jpeg.getvalue()).decode("ascii")}).encode()
+        self.client.screenshot = lambda: png.getvalue()
+        self.client.action_size = lambda: {"width": 24.0, "height": 20.0}
+        try:
+            match = self.client.find_image(template_data.getvalue(), confidence=0.9, region=(10, 6, 20, 16))
+            self.assertIsNotNone(match)
+            self.assertEqual((match.x, match.y, match.width, match.height), (12, 8, 6, 4))
+            # 公开 screenshot() 保持原有 PNG 字节语义，不被 HID JPEG 改写。
+            self.assertEqual(self.client.screenshot(), png.getvalue())
+        finally:
+            self.client.request, self.client.screenshot, self.client.action_size = original_request, original_screenshot, original_action_size
+        self.assertEqual(calls, ["/api/hid/screenshot"])
+
+    def test_hid_vision_failure_falls_back_to_png_and_is_cached_unavailable(self):
+        from io import BytesIO
+        from PIL import Image
+
+        png = BytesIO(); Image.new("RGB", (8, 6), "black").save(png, "PNG")
+        original_request, original_screenshot = self.client.request, self.client.screenshot
+        calls = []
+        def unavailable(method, path, **kwargs):
+            calls.append(path)
+            raise DeviceResponseError("HID unavailable")
+        self.client.request = unavailable
+        self.client.screenshot = lambda: png.getvalue()
+        try:
+            first, first_action = self.client._capture_vision_frame()
+            second, second_action = self.client._capture_vision_frame()
+        finally:
+            self.client.request, self.client.screenshot = original_request, original_screenshot
+        self.assertEqual((first.width, first.height), (8, 6))
+        self.assertEqual((second.width, second.height), (8, 6))
+        self.assertEqual(first_action, {"width": 8.0, "height": 6.0})
+        self.assertEqual(second_action, {"width": 8.0, "height": 6.0})
+        self.assertEqual(calls, ["/api/hid/screenshot"])
+
+    def test_exact_image_matching_keeps_png_capture_path(self):
+        from io import BytesIO
+        from PIL import Image
+
+        source = Image.new("RGB", (8, 6), "black")
+        source.putpixel((3, 2), (255, 0, 0))
+        image = BytesIO(); source.save(image, "PNG")
+        original_hid, original_screenshot = self.client._hid_vision_frame, self.client.screenshot
+        self.client._hid_vision_frame = lambda: self.fail("exact matching must not use HID JPEG")
+        self.client.screenshot = lambda: image.getvalue()
+        try:
+            self.assertIsNotNone(self.client.find_image(image.getvalue(), confidence=1.0))
+        finally:
+            self.client._hid_vision_frame, self.client.screenshot = original_hid, original_screenshot
 
     def test_scroll_until_image_checks_before_each_directional_swipe(self):
         original_find, original_swipe, original_relative = self.client.find_image, self.client.swipe_relative, self.client.relative_point
@@ -966,6 +1036,7 @@ class ClientTests(unittest.TestCase):
     def test_find_any_image_stops_after_first_match(self):
         calls = []
         class Frame:
+            width, height = 1, 1
             def find_image(self, template, **kwargs):
                 calls.append(template)
                 return object() if template == "first" else None

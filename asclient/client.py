@@ -1,6 +1,8 @@
 """AScript local-device client. Public APIs are synchronous and dependency-free."""
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 import json
 import math
@@ -142,6 +144,8 @@ class AScriptClient:
         if not math.isfinite(coordinate_cache_ttl) or coordinate_cache_ttl < 0: raise ValueError("coordinate_cache_ttl must be a finite non-negative number of seconds")
         self.coordinate_cache_ttl = float(coordinate_cache_ttl)
         self._space_cache: tuple[float, dict[str, float], dict[str, float]] | None = None
+        self._hid_vision_available: bool | None = None
+        self._vision_action_dimensions: dict[str, float] | None = None
 
     @property
     def base_url(self) -> str:
@@ -445,19 +449,130 @@ class AScriptClient:
     def _image_match(image: bytes, template: str | Path | bytes, *, confidence: float, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
         return ScreenFrame(image).find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
 
+    def _hid_vision_frame(self) -> ScreenFrame | None:
+        """Return the existing HID recording JPEG frame, or ``None`` when unavailable.
+
+        The endpoint is present only when the device-side broadcast extension is
+        running. It is a best-effort optimization for host-side image matching;
+        public screenshot and pixel APIs deliberately retain their PNG contract.
+        """
+        if self._hid_vision_available is False:
+            return None
+        try:
+            value = self.json("GET", "/api/hid/screenshot", timeout=min(self.timeout, 10.0)).get("value")
+            if not isinstance(value, str) or not value or value == "null":
+                raise ValueError("HID screenshot response has no image")
+            image = base64.b64decode(value, validate=True)
+            frame = ScreenFrame(image)
+        except (DeviceResponseError, DeviceOperationError, ValueError, binascii.Error, OSError):
+            # A missing, malformed or incompatible endpoint should not make a
+            # previously working vision workflow fail. Avoid retrying it in every
+            # wait loop; the normal PNG endpoint remains the compatibility path.
+            self._hid_vision_available = False
+            return None
+        except DeviceConnectionError:
+            # Do not cache transient transport failures as an unavailable feature.
+            return None
+        self._hid_vision_available = True
+        return frame
+
+    def _vision_action_size(self, frame: ScreenFrame) -> dict[str, float]:
+        """Return action-coordinate dimensions for a HID frame.
+
+        HID JPEGs can differ by one pixel from the physical PNG action space.
+        Calibrate once with the authoritative PNG endpoint, then refresh after
+        a rotation. This keeps ImageMatch coordinates safe for ``tap()`` while
+        leaving steady-state matching on the faster JPEG path.
+        """
+        cached = self._vision_action_dimensions
+        if cached is not None and (cached["width"] > cached["height"]) == (frame.width > frame.height):
+            return cached
+        space = self._space_cache
+        if space is not None and time.monotonic() < space[0]:
+            action = dict(space[2])
+            if (action["width"] > action["height"]) == (frame.width > frame.height):
+                self._vision_action_dimensions = action
+                return action
+        action = self.action_size()
+        self._vision_action_dimensions = action
+        return action
+
+    def _capture_vision_frame(self, *, exact: bool = False) -> tuple[ScreenFrame, dict[str, float]]:
+        """Capture one frame for host-side template matching.
+
+        Exact matching remains PNG-only because the HID source is a lossy JPEG.
+        Other matching attempts use HID when present and automatically fall back
+        to the regular PNG endpoint on unsupported devices.
+        """
+        if not exact:
+            frame = self._hid_vision_frame()
+            if frame is not None:
+                try:
+                    return frame, self._vision_action_size(frame)
+                except AScriptError:
+                    # Coordinate calibration is not optional; preserve coordinate
+                    # correctness by falling back rather than returning raw JPEG
+                    # coordinates when the authoritative PNG size is unavailable.
+                    pass
+        frame = self.capture_frame()
+        return frame, {"width": float(frame.width), "height": float(frame.height)}
+
+    @staticmethod
+    def _scale_vision_region(region: tuple[int, int, int, int] | tuple[float, float, float, float] | None, action: Mapping[str, float], frame: ScreenFrame) -> tuple[int, int, int, int] | tuple[float, float, float, float] | None:
+        """Map an absolute action-space region into a HID frame's pixel space."""
+        if region is None or not all(isinstance(value, int) for value in region):
+            return region
+        x_scale, y_scale = frame.width / action["width"], frame.height / action["height"]
+        left, top, right, bottom = region
+        return (
+            max(0, min(frame.width - 1, math.floor(left * x_scale))),
+            max(0, min(frame.height - 1, math.floor(top * y_scale))),
+            max(1, min(frame.width, math.ceil(right * x_scale))),
+            max(1, min(frame.height, math.ceil(bottom * y_scale))),
+        )
+
+    @staticmethod
+    def _scale_vision_match(match: ImageMatch | None, action: Mapping[str, float], frame: ScreenFrame) -> ImageMatch | None:
+        """Map HID-frame match coordinates back to public action coordinates."""
+        if match is None or (action["width"] == frame.width and action["height"] == frame.height):
+            return match
+        x_scale, y_scale = action["width"] / frame.width, action["height"] / frame.height
+        left, top = round(match.x * x_scale), round(match.y * y_scale)
+        right, bottom = round((match.x + match.width) * x_scale), round((match.y + match.height) * y_scale)
+        return ImageMatch(left, top, max(1, right - left), max(1, bottom - top), match.confidence)
+
+    def _find_image_in_vision_frame(self, frame: ScreenFrame, action: Mapping[str, float], template: str | Path | bytes, *, confidence: float, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
+        match = frame.find_image(
+            template,
+            confidence=confidence,
+            region=self._scale_vision_region(region, action, frame),
+            region_relative=region_relative,
+            region_pixels=self._scale_vision_region(region_pixels, action, frame),
+        )
+        return self._scale_vision_match(match, action, frame)
+
     def find_image(self, template: str | Path | bytes, *, confidence: float = 0.9, region: tuple[int, int, int, int] | tuple[float, float, float, float] | None = None, region_relative: tuple[float, float, float, float] | None = None, region_pixels: tuple[int, int, int, int] | None = None) -> ImageMatch | None:
-        """在当前截图中匹配一个本机模板。"""
-        return self.capture_frame().find_image(template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
+        """在当前截图中匹配一个本机模板。
+
+        ``confidence < 1`` 时优先读取设备已有的 HID 录屏 JPEG 帧；接口不可用
+        时自动回退 PNG。精确匹配（``confidence == 1``）保持无损 PNG 语义。
+        """
+        frame, action = self._capture_vision_frame(exact=confidence == 1)
+        return self._find_image_in_vision_frame(frame, action, template, confidence=confidence, region=region, region_relative=region_relative, region_pixels=region_pixels)
 
     def find_images(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> dict[str, ImageMatch | None]:
         """在一张截图中匹配多个模板。"""
-        return self.capture_frame().find_images(dict(templates), confidence=confidence, regions=dict(regions or {}), regions_relative=dict(regions_relative or {}), regions_pixels=dict(regions_pixels or {}))
+        frame, action = self._capture_vision_frame(exact=confidence == 1)
+        return {
+            name: self._find_image_in_vision_frame(frame, action, template, confidence=confidence, region=(regions or {}).get(name), region_relative=(regions_relative or {}).get(name), region_pixels=(regions_pixels or {}).get(name))
+            for name, template in templates.items()
+        }
 
     def find_any_image(self, templates: Mapping[str, str | Path | bytes], *, confidence: float = 0.9, regions: Mapping[str, tuple[int, int, int, int] | tuple[float, float, float, float] | None] | None = None, regions_relative: Mapping[str, tuple[float, float, float, float] | None] | None = None, regions_pixels: Mapping[str, tuple[int, int, int, int] | None] | None = None) -> tuple[str, ImageMatch] | None:
         """在一张截图中寻找任意模板，返回第一个命中的名称和结果。"""
-        frame = self.capture_frame()
+        frame, action = self._capture_vision_frame(exact=confidence == 1)
         for name, template in templates.items():
-            match = frame.find_image(template, confidence=confidence, region=(regions or {}).get(name), region_relative=(regions_relative or {}).get(name), region_pixels=(regions_pixels or {}).get(name))
+            match = self._find_image_in_vision_frame(frame, action, template, confidence=confidence, region=(regions or {}).get(name), region_relative=(regions_relative or {}).get(name), region_pixels=(regions_pixels or {}).get(name))
             if match is not None:
                 return name, match
         return None
