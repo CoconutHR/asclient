@@ -455,7 +455,11 @@ colors = frame.pixels_relative([(0.1, 0.1), (0.9, 0.9)])
 
 在当前截图中匹配本机模板 PNG/JPEG。`template` 可为本地文件路径或图像字节；返回 `ImageMatch(x, y, width, height, confidence)`，所有结果坐标均为实际物理像素。`confidence` 范围为 `(0, 1]`，值越高要求越接近；默认 `0.9`。
 
-为避免把整张 PNG 回传主机，`confidence < 1` 的主机侧匹配会优先使用设备已有的 `/api/hid/screenshot` JPEG 帧；该接口在 HID 录屏扩展可用时可显著降低 USB 取图延迟，缺失或异常时自动回退常规 PNG 截图，无需改动调用代码或设备端软件。HID JPEG 是有损图像，因此 `confidence=1.0` 的精确匹配仍固定使用无损 PNG；`screenshot()`、`pixel()` 和 `assert_color()` 等需要 PNG/精确像素语义的接口也不会使用该快路径。
+为避免把整张 PNG 回传主机，`confidence < 1` 的主机侧匹配会优先使用设备已有的 `/api/hid/screenshot` JPEG 帧；该接口在 HID 录屏扩展可用时可显著降低 USB 取图延迟，缺失、返回空图、图像损坏或请求异常时自动回退常规 PNG 截图。这个选择完全在客户端内部完成：不需要修改 IPA、安装设备端组件或更改 `find_image()`、`wait_image()`、`tap_image()` 等既有调用。
+
+HID JPEG 是有损图像，因此 `confidence=1.0` 的精确匹配仍固定使用无损 PNG；`screenshot()`、`save_screenshot()`、`capture_frame()`、`pixel()`、`pixels()`、`assert_color()` 和 `Run` 取证截图等需要 PNG/精确像素语义的接口也不会使用该快路径。设备 HID 图像与 PNG 动作尺寸偶尔可能相差一个像素，客户端会在首次使用该快路径时读取 PNG 动作尺寸并将匹配结果映射回公开 API 的物理像素坐标，故仍可直接执行 `client.tap(*match.center)`；方向或尺寸改变后会重新校准。首次匹配可能包含 HID 初始化与坐标校准开销，不应以单次冷启动结果代表稳定轮询延迟。
+
+真机 USB 验证（iPhone / iOS 26.6.1 / AScript 4001）中，HID JPEG 的获取与 Pillow 解码中位约 `81ms`，完整 PNG 截图回传中位约 `406ms`；在实际删除任务轮询脚本的稳定热态下，单次模板查询约 `73–126ms`，原 PNG 路径约 `200–250ms`。这些是特定设备、模板和 USB 环境的观测值，而不是跨设备性能承诺。生产脚本应使用同一分辨率、方向和 UI 缩放条件截取模板，为 JPEG 匹配选择经实机验证的阈值，并用 `region` / `region_relative` 限制搜索范围。
 
 单模板和所有图像等待/点击/滚动 API 都可用物理像素 `region=(left, top, right, bottom)` 或比例 `region_relative=(left, top, right, bottom)` 限制搜索区域，两者不能同时传入。多模板接口的 `regions`、`regions_relative` 为按模板名称映射的同类区域；每张模板可有自己的小区域。旧 `region_pixels` / `regions_pixels` 是物理像素弃用别名，会发出 `DeprecationWarning`。旧版比例 `region` 仅在包含非整数时暂时兼容并发出警告；尤其旧全屏写法 `region=(0, 0, 1, 1)` 必须改为 `region_relative=(0, 0, 1, 1)`，因为新规则下它表示 1×1 物理像素区域。
 

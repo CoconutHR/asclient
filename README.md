@@ -194,7 +194,7 @@ device.save_screenshot_crop_relative("artifacts/bottom.png", 0, 0.5, 1, 1)
 py -m asclient shot artifacts\bottom.png --crop-rel 0 0.5 1 1
 ```
 
-本机模板可等待图标出现/消失，也可指定置信度：
+本机模板可等待图标出现/消失，也可指定置信度。对于通常使用的容差匹配（`confidence < 1.0`），客户端会优先读取设备已存在的 HID JPEG 帧；HID 不可用时自动回退 PNG，因此无需为 USB 场景引入另一套 API。精确匹配（`confidence=1.0`）、截图留证与取色仍使用无损 PNG；模板必须接受 JPEG 的有损压缩，并应在目标设备上验收阈值。
 
 ```python
 match = device.wait_image("assets/login-icon.png", confidence=0.95, timeout=15, log=True)
