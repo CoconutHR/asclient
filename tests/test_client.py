@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -91,6 +92,8 @@ class ClientTests(unittest.TestCase):
         crop = self.client.crop_png_relative(source, 0.25, 0.25, 0.75, 0.75)
         self.assertEqual(self.client._png_size(crop), (2.0, 2.0))
         self.assertIn(bytes((1, 1, 0, 255)), zlib.decompress(crop[crop.index(b"IDAT") + 4:-12]))
+        self.assertEqual(self.client._png_size(self.client.crop_png(source, 1, 1, 3, 3)), (2.0, 2.0))
+        with self.assertRaises(ValueError): self.client.crop_png(source, 1, 1, 5, 3)
         original = self.client.screenshot
         self.client.screenshot = lambda: source
         try:
@@ -849,7 +852,11 @@ class ClientTests(unittest.TestCase):
             self.assertIn('id="coordinate"', page)
             self.assertIn('id="divider-left"', page)
             self.assertIn("ASClient 控件检查器", page)
-            self.assertIn("裁剪保存", page)
+            self.assertIn("框选区域", page)
+            self.assertIn("保存 PNG", page)
+            self.assertIn("snapshot_id", page)
+            self.assertIn("freezeReady", page)
+            self.assertIn("setScreenImage", page)
             self.assertIn("验证选择器", page)
             with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
                 snapshot = json.loads(response.read())
@@ -863,20 +870,85 @@ class ClientTests(unittest.TestCase):
         finally:
             server.shutdown(); server.server_close()
 
-    def test_inspector_saves_browser_crop_only_in_configured_directory(self):
+    def test_inspector_crops_a_frozen_png_and_writes_metadata(self):
+        from io import BytesIO
+        from PIL import Image
         from asclient.inspector import serve
-        image = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (2).to_bytes(4, "big") + (3).to_bytes(4, "big")
+
+        source_image = Image.new("RGBA", (4, 3), (0, 0, 0, 255))
+        source_image.putpixel((1, 1), (12, 34, 56, 255))
+        source_image.putpixel((2, 2), (78, 90, 123, 255))
+        source_data = BytesIO(); source_image.save(source_data, "PNG")
+        source = source_data.getvalue()
+        original_screenshot = self.client.screenshot
+        self.client.screenshot = lambda: source
         with tempfile.TemporaryDirectory() as directory:
             server = serve(self.client, open_browser=False, output_dir=directory)
             thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
             try:
-                request = Request(f"http://127.0.0.1:{server.server_port}/api/crop", data=json.dumps({"image": base64.b64encode(image).decode()}).encode(), headers={"Content-Type": "application/json"}, method="POST")
-                with urlopen(request, timeout=2) as response: result = json.loads(response.read())
-                saved = Path(result["path"])
+                with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
+                    snapshot = json.loads(response.read())
+                self.assertEqual(base64.b64decode(snapshot["image"]), source)
+                self.assertTrue(snapshot["snapshot_id"])
+                request = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/crop",
+                    data=json.dumps({"snapshot_id": snapshot["snapshot_id"], "rect": {"left": 1, "top": 1, "right": 3, "bottom": 3}}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(request, timeout=2) as response:
+                    result = json.loads(response.read())
+                saved, metadata_path = Path(result["path"]), Path(result["metadata_path"])
                 self.assertEqual(saved.parent, Path(directory).resolve())
-                self.assertEqual(saved.read_bytes(), image)
+                self.assertEqual(self.client._png_size(saved.read_bytes()), (2.0, 2.0))
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(metadata["source_snapshot_id"], snapshot["snapshot_id"])
+                self.assertEqual(metadata["source_size"], {"width": 4, "height": 3})
+                self.assertEqual(metadata["region"], {"left": 1, "top": 1, "right": 3, "bottom": 3, "width": 2, "height": 2, "center": {"x": 2.0, "y": 2.0}})
+                self.assertEqual(metadata["region_relative"], {"left": 0.25, "top": 1 / 3, "right": 0.75, "bottom": 1.0})
+                missing = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/crop",
+                    data=json.dumps({"snapshot_id": "missing", "rect": {"left": 1, "top": 1, "right": 3, "bottom": 3}}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as expired:
+                    urlopen(missing, timeout=2)
+                self.assertEqual(expired.exception.code, 404)
+                invalid = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/crop",
+                    data=json.dumps({"snapshot_id": snapshot["snapshot_id"], "rect": {"left": 3, "top": 1, "right": 1, "bottom": 3}}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as bad_rect:
+                    urlopen(invalid, timeout=2)
+                self.assertEqual(bad_rect.exception.code, 400)
+                boolean_rect = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/crop",
+                    data=json.dumps({"snapshot_id": snapshot["snapshot_id"], "rect": {"left": True, "top": 1, "right": 3, "bottom": 3}}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as bad_type:
+                    urlopen(boolean_rect, timeout=2)
+                self.assertEqual(bad_type.exception.code, 400)
+                with patch("asclient.inspector._MAX_SNAPSHOTS", 1):
+                    with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2) as response:
+                        evicted = json.loads(response.read())
+                    with urlopen(f"http://127.0.0.1:{server.server_port}/api/snapshot", timeout=2):
+                        pass
+                    evicted_request = Request(
+                        f"http://127.0.0.1:{server.server_port}/api/crop",
+                        data=json.dumps({"snapshot_id": evicted["snapshot_id"], "rect": {"left": 1, "top": 1, "right": 3, "bottom": 3}}).encode(),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with self.assertRaises(HTTPError) as evicted_snapshot:
+                        urlopen(evicted_request, timeout=2)
+                    self.assertEqual(evicted_snapshot.exception.code, 404)
             finally:
-                server.shutdown(); server.server_close()
+                server.shutdown(); server.server_close(); self.client.screenshot = original_screenshot
 
     def test_frame_pixel_colors_and_relative_coordinates_share_one_screenshot(self):
         from io import BytesIO

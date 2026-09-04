@@ -2,7 +2,7 @@
 
 首次使用请先阅读[从零开始使用教程](从零开始使用教程.md)：它按安装、Wi-Fi/USB 连接、Inspector、首个程序、排错和功能示例组织；本文档专注于完整 API 参数、返回值和异常。按任务查找一行写法可先看仓库 [README](../README.md) 的“任务速查”。
 
-本文对应当前主分支 ASClient `0.9.3（未发布）`；除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
+本文对应当前主分支 ASClient `0.9.4（未发布）`；除非特别说明，所有调用均为同步调用，失败时抛出 `AScriptError` 的子类。生产接入说明见 [生产使用指南](生产使用指南.md)。
 
 ## 1. 快速选择接口
 
@@ -431,7 +431,7 @@ button = client.screenshot_crop(0, 1800, 1179, 2556)
 client.save_screenshot_crop("artifacts/bottom.png", 0, 1800, 1179, 2556)
 ```
 
-实现无第三方依赖，支持移动端截图使用的非隔行 8 位 RGB/RGBA PNG；非标准 PNG 会抛出 `DeviceResponseError`。
+实现无第三方依赖，支持移动端截图使用的非隔行 8 位 RGB/RGBA PNG；非标准 PNG 会抛出 `DeviceResponseError`。已有截图字节需要按物理像素矩形复用时，可调用 `AScriptClient.crop_png(image, left, top, right, bottom)`；矩形同样采用左上包含、右下排除。
 
 ### `capture_frame()`、`pixel()` 与 `pixels()`
 
@@ -1203,7 +1203,7 @@ run_forever(client, host="127.0.0.1", port=0)
 
 | 函数 | 说明 |
 | --- | --- |
-| `serve(client, host="127.0.0.1", port=0, open_browser=True, output_dir=None)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口；`output_dir` 指定“裁剪保存”的落盘目录，默认当前工作目录 |
+| `serve(client, host="127.0.0.1", port=0, open_browser=True, output_dir=None)` | 创建但不启动 `ThreadingHTTPServer`；`port=0` 自动选端口；`output_dir` 指定 Inspector 冻结 PNG 区域裁剪及 JSON 元数据的落盘目录，默认当前工作目录 |
 | `run_forever(client, host="127.0.0.1", port=0, open_browser=True) -> str` | 创建并阻塞运行，Ctrl+C 后关闭；返回本地 URL。不接受 `output_dir`，裁剪图固定落在当前工作目录 |
 
 `host`/`port` 只决定 Inspector 自身的 HTTP 监听地址，与连接哪台设备无关——设备由传入的 `client` 决定。CLI 侧对应关系为：
@@ -1216,7 +1216,7 @@ run_forever(client, host="127.0.0.1", port=0)
 | 是否自动开浏览器 | `inspect --no-browser` | `serve(open_browser=False)` |
 | 裁剪图落盘目录 | 不可配置，固定为当前工作目录 | `serve(output_dir=...)` |
 
-Inspector 只应绑定 `127.0.0.1`。`/api/snapshot`、`/api/selector` 与 `/api/crop` 都没有鉴权机制，`--host 0.0.0.0` 会把设备截图与控件树暴露给同网段所有主机，因此该参数仅保留给隔离环境下的特殊调试，不应在日常或生产中使用。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。顶部“裁剪保存”按钮进入裁剪模式，在截图上拖拽矩形、松开后会生成原始像素 PNG，保存到运行 `inspect` 命令的当前工作目录，且服务端生成安全的时间戳文件名。不需要、也不应作为局域网服务使用。
+Inspector 只应绑定 `127.0.0.1`。`/api/snapshot`、`/api/selector` 与 `/api/crop` 都没有鉴权机制，`--host 0.0.0.0` 会把设备截图与控件树暴露给同网段所有主机，因此该参数仅保留给隔离环境下的特殊调试，不应在日常或生产中使用。界面所有操作文案均为中文，它在顶部显示当前 App 的名称、Bundle ID、PID 和当前树节点数量，并提供当前页面截图和节点信息。树、截图和属性面板之间的两条分隔线可拖动调整宽度；中间截图始终按原始宽高比缩放，不会被拉伸。点击“框选区域”后，Inspector 会获取并冻结一张原始 PNG、暂停实时刷新；图片显示完成前不能框选或保存，避免坐标对应旧画面。拖动仅更新物理像素选区；确认后点击“保存 PNG”或按 `Enter` 才会生成无损裁剪图和同名 JSON 元数据，`Esc` 可取消。服务端按短期有效的 `snapshot_id` 从冻结源 PNG 裁剪，截图缓存和请求体均有限额，不需要、也不应作为局域网服务使用。
 
 CLI 启动时会打印实际 Inspector URL。浏览器在刷新或关闭页面时取消正在传输的快照属于正常情况，客户端会静默结束该响应，不会影响设备端状态或打印终端堆栈。
 

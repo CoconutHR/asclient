@@ -244,7 +244,7 @@ py -m asclient --device 192.168.3.25:9096 inspect --port 8765
 
 USB 场景下设备地址应为 `127.0.0.1:9096`（先在另一个终端运行 `tunnel`）。启动后终端会打印实际 URL，随机端口时必须从这一行获取端口号。
 
-顶部的“裁剪保存”可进入裁剪模式：在截图上拖拽矩形，松开后会将原始像素 PNG 保存到启动 `inspect` 命令的当前目录，文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_xxxxxx.png`。CLI 不提供修改该目录的参数；需要指定目录时使用 Python `serve(client, output_dir=...)`。
+顶部的“框选区域”会冻结一张原始 PNG 并暂停实时刷新：在截图上拖拽仅更新选区，实时显示物理像素坐标、尺寸、中心点和相对坐标；确认后点击“保存 PNG”（或按 `Enter`）才会保存无损裁剪图及同名 JSON 元数据，按 `Esc` 可取消。文件名形如 `inspect_crop_YYYYMMDD_HHMMSS_x120_y340_w700_h700.png`。CLI 不提供修改该目录的参数；需要指定目录时使用 Python `serve(client, output_dir=...)`。
 
 **不要使用 `--host 0.0.0.0`。** Inspector 的 `/api/*` 接口没有任何鉴权，能读取设备截图与控件树；绑定到非回环地址等于把手机屏幕内容暴露给同网段所有主机。该参数仅为特殊调试场景保留，生产与日常使用应保持默认的 `127.0.0.1`。
 

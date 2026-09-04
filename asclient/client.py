@@ -29,6 +29,9 @@ from ._websocket import WebSocket
 LOG_PORT = 10102
 """Device-side log WebSocket port; the device service does not make it configurable."""
 
+_MAX_CROPPABLE_PNG_BYTES = 64 * 1024 * 1024
+"""Upper bound for a decoded PNG frame handled by the standard-library cropper."""
+
 
 @dataclass(frozen=True)
 class DeviceAddress:
@@ -371,21 +374,29 @@ class AScriptClient:
         return destination.resolve()
 
     @staticmethod
-    def crop_png_relative(image: bytes, left: float, top: float, right: float, bottom: float) -> bytes:
-        """Crop a standard screenshot PNG using a 0..1 relative rectangle."""
-        try:
-            left, top, right, bottom = (float(value) for value in (left, top, right, bottom))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("crop ratios must be finite numbers between 0 and 1") from exc
-        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
-            raise ValueError("crop ratios must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+    def crop_png(image: bytes, left: int, top: int, right: int, bottom: int) -> bytes:
+        """Crop a standard screenshot PNG using a physical-pixel rectangle.
+
+        The rectangle follows the public coordinate contract: left/top are
+        inclusive, right/bottom are exclusive. This standard-library helper is
+        also used by Inspector so a frozen source PNG can be cropped without
+        requiring Pillow or round-tripping through a browser canvas.
+        """
         if not image.startswith(b"\x89PNG\r\n\x1a\n"):
             raise DeviceResponseError("screenshot is not a PNG image")
+        size = AScriptClient._png_size(image)
+        if size is None:
+            raise DeviceResponseError("PNG image has no valid dimensions")
+        width, height = (int(size[0]), int(size[1]))
+        values = (left, top, right, bottom)
+        if not all(isinstance(value, int) and not isinstance(value, bool) for value in values) or not (0 <= left < right <= width and 0 <= top < bottom <= height):
+            raise ValueError("crop pixels must satisfy screen bounds and left < right, top < bottom")
         offset, ihdr, compressed = 8, None, bytearray()
         while offset + 12 <= len(image):
             length = int.from_bytes(image[offset:offset + 4], "big")
             kind, data = image[offset + 4:offset + 8], image[offset + 8:offset + 8 + length]
-            if len(data) != length: raise DeviceResponseError("truncated PNG image")
+            if len(data) != length:
+                raise DeviceResponseError("truncated PNG image")
             if kind == b"IHDR": ihdr = data
             elif kind == b"IDAT": compressed.extend(data)
             elif kind == b"IEND": break
@@ -397,8 +408,19 @@ class AScriptClient:
         if depth != 8 or channels is None or compression != 0 or filter_method != 0 or interlace != 0:
             raise DeviceResponseError("only non-interlaced 8-bit RGB/RGBA PNG screenshots can be cropped")
         stride, bpp = width * channels, channels
-        raw = zlib.decompress(compressed)
-        if len(raw) != height * (stride + 1): raise DeviceResponseError("PNG image data has an invalid length")
+        expected_raw_length = height * (stride + 1)
+        if expected_raw_length > _MAX_CROPPABLE_PNG_BYTES:
+            raise DeviceResponseError("PNG image exceeds the maximum supported crop size")
+        try:
+            decompressor = zlib.decompressobj()
+            raw = decompressor.decompress(bytes(compressed), expected_raw_length + 1)
+            if len(raw) > expected_raw_length or decompressor.unconsumed_tail:
+                raise DeviceResponseError("PNG image data exceeds the expected size")
+            raw += decompressor.flush()
+        except zlib.error as exc:
+            raise DeviceResponseError("PNG image data cannot be decompressed") from exc
+        if len(raw) != expected_raw_length or not decompressor.eof:
+            raise DeviceResponseError("PNG image data has an invalid length")
         rows: list[bytearray] = []
         previous = bytearray(stride)
         for row_index in range(height):
@@ -413,15 +435,29 @@ class AScriptClient:
                     row[index] = (row[index] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
                 elif filter_type != 0: raise DeviceResponseError("PNG image uses an unsupported filter")
             rows.append(row); previous = row
-        x0, x1 = int(width * left), max(int(width * right), int(width * left) + 1)
-        y0, y1 = int(height * top), max(int(height * bottom), int(height * top) + 1)
-        x1, y1 = min(x1, width), min(y1, height)
-        cropped_width, cropped_height = x1 - x0, y1 - y0
-        cropped = b"".join(b"\0" + bytes(row[x0 * channels:x1 * channels]) for row in rows[y0:y1])
+        cropped_width, cropped_height = right - left, bottom - top
+        cropped = b"".join(b"\0" + bytes(row[left * channels:right * channels]) for row in rows[top:bottom])
         header = struct.pack(">IIBBBBB", cropped_width, cropped_height, depth, color_type, compression, filter_method, interlace)
         def chunk(kind: bytes, data: bytes) -> bytes:
             return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
         return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(cropped)) + chunk(b"IEND", b"")
+
+    @staticmethod
+    def crop_png_relative(image: bytes, left: float, top: float, right: float, bottom: float) -> bytes:
+        """Crop a standard screenshot PNG using a 0..1 relative rectangle."""
+        try:
+            left, top, right, bottom = (float(value) for value in (left, top, right, bottom))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("crop ratios must be finite numbers between 0 and 1") from exc
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in (left, top, right, bottom)) or left >= right or top >= bottom:
+            raise ValueError("crop ratios must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+        size = AScriptClient._png_size(image)
+        if size is None:
+            raise DeviceResponseError("screenshot is not a PNG image")
+        width, height = (int(size[0]), int(size[1]))
+        x0, x1 = int(width * left), min(width, max(int(width * right), int(width * left) + 1))
+        y0, y1 = int(height * top), min(height, max(int(height * bottom), int(height * top) + 1))
+        return AScriptClient.crop_png(image, x0, y0, x1, y1)
 
     def screenshot_crop_relative(self, left: float, top: float, right: float, bottom: float) -> bytes:
         """抓取并按比例裁剪 PNG。"""
